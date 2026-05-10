@@ -181,7 +181,7 @@ applyLagReduction()
 -- FPS LOCK
 -- =====================================================================
 local fpsLocked    = true
-local fpsTarget    = 20
+local fpsTarget    = 5
 local minFrameTime = 1 / fpsTarget
 local lastFrame    = tick()
 
@@ -339,6 +339,33 @@ byLabel.BorderSizePixel    = 0
 byLabel.ZIndex             = 3
 byLabel.Parent             = container
 
+-- Live FPS counter — top-right corner of screen
+local fpsCounterBg = Instance.new("Frame")
+fpsCounterBg.Size                  = UDim2.new(0, 110, 0, 36)
+fpsCounterBg.AnchorPoint           = Vector2.new(1, 0)
+fpsCounterBg.Position              = UDim2.new(1, -12, 0, 12)
+fpsCounterBg.BackgroundColor3      = Color3.fromRGB(0, 8, 28)
+fpsCounterBg.BackgroundTransparency= 0.2
+fpsCounterBg.BorderSizePixel       = 0
+fpsCounterBg.ZIndex                = 6
+fpsCounterBg.Parent                = screenGui
+Instance.new("UICorner", fpsCounterBg).CornerRadius = UDim.new(0, 10)
+local fpsCounterStroke = Instance.new("UIStroke", fpsCounterBg)
+fpsCounterStroke.Color     = Color3.fromRGB(0, 50, 160)
+fpsCounterStroke.Thickness = 1.2
+
+local fpsCounterLabel = Instance.new("TextLabel")
+fpsCounterLabel.Size               = UDim2.new(1, 0, 1, 0)
+fpsCounterLabel.BackgroundTransparency = 1
+fpsCounterLabel.Text               = "FPS: --"
+fpsCounterLabel.TextColor3         = Color3.fromRGB(80, 170, 255)
+fpsCounterLabel.TextTransparency   = 0.05
+fpsCounterLabel.Font               = Enum.Font.Cartoon
+fpsCounterLabel.TextScaled         = true
+fpsCounterLabel.BorderSizePixel    = 0
+fpsCounterLabel.ZIndex             = 7
+fpsCounterLabel.Parent             = fpsCounterBg
+
 -- =====================================================================
 -- FPS CONTROL PANEL  — bottom-center
 -- Preset buttons + custom TextBox input + toggle ON/OFF
@@ -388,11 +415,11 @@ Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 8)
 Instance.new("UIStroke", toggleBtn).Color = Color3.fromRGB(0, 80, 200)
 
 -- Preset buttons row
-local presets     = {10, 20, 30, 60, 120}
+local presets     = {5, 10, 20, 30, 60}
 local presetBtns  = {}
 local btnW        = 46
-local btnGap      = 4
-local rowX        = 10
+local btnGap      = 2
+local rowX        = 6
 local rowY        = 34
 
 for i, fps in ipairs(presets) do
@@ -466,7 +493,7 @@ local curFpsLbl = Instance.new("TextLabel")
 curFpsLbl.Size               = UDim2.new(0, 50, 0, 26)
 curFpsLbl.Position           = UDim2.new(0, 222, 0, 70)
 curFpsLbl.BackgroundTransparency = 1
-curFpsLbl.Text               = "20 fps"
+curFpsLbl.Text               = "5 fps"
 curFpsLbl.TextColor3         = Color3.fromRGB(50, 120, 220)
 curFpsLbl.TextTransparency   = 0.1
 curFpsLbl.Font               = Enum.Font.Cartoon
@@ -476,7 +503,7 @@ curFpsLbl.ZIndex             = 6
 curFpsLbl.Parent             = fpsPanel
 
 -- ── State & refresh helpers ─────────────────────────────────────────
-local activePresetIdx = 2  -- index into presets table (20 fps default)
+local activePresetIdx = 1  -- index into presets table (5 fps default)
 
 local function highlightPresets()
     for i, data in ipairs(presetBtns) do
@@ -595,8 +622,41 @@ task.spawn(function()
 end)
 
 -- =====================================================================
--- ANTI-AFK AUTO-JUMP  (randomised interval to avoid pattern detection)
+-- LIVE FPS COUNTER  (samples every 0.5s using RenderStepped delta)
 -- =====================================================================
+local fpsHistory = {}
+local fpsHistoryMax = 10  -- rolling average over 10 samples
+
+RunService.RenderStepped:Connect(function(dt)
+    -- dt is time since last frame in seconds, so 1/dt = fps
+    local sample = math.clamp(math.floor(1 / math.max(dt, 0.001)), 0, 9999)
+    table.insert(fpsHistory, sample)
+    if #fpsHistory > fpsHistoryMax then
+        table.remove(fpsHistory, 1)
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        if #fpsHistory > 0 then
+            local sum = 0
+            for _, v in ipairs(fpsHistory) do sum = sum + v end
+            local avg = math.floor(sum / #fpsHistory)
+            -- Colour: green = good, yellow = mid, red = low
+            if avg >= 55 then
+                fpsCounterLabel.TextColor3 = Color3.fromRGB(60, 220, 100)
+            elseif avg >= 25 then
+                fpsCounterLabel.TextColor3 = Color3.fromRGB(220, 190, 50)
+            else
+                fpsCounterLabel.TextColor3 = Color3.fromRGB(220, 60, 60)
+            end
+            fpsCounterLabel.Text = "FPS: " .. avg
+        end
+    end
+end)
+
+
 task.spawn(function()
     while true do
         task.wait(4.7 + math.random(0, 60) / 100)

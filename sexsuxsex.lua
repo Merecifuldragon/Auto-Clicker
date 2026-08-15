@@ -1,5 +1,6 @@
 -- Blox Fruits | Crew Tools
--- Made specially for ujjwal by munchdogs
+-- Owner/Creator: Merciful
+-- Modified sync build: replacement snapshots + distributed cancel
 
 local Players            = game:GetService("Players")
 local ReplicatedStorage  = game:GetService("ReplicatedStorage")
@@ -14,6 +15,7 @@ local LocalPlayer  = Players.LocalPlayer
 local INVITE_DELAY = 0.5
 local SYNC_FILE    = "bf_crew_sync.txt"
 local hasFS        = type(writefile) == "function" and type(readfile) == "function"
+SCRIPT_READY = true
 
 local W, H, MH = 430, 840, 64   -- window width, full height, mini height
 
@@ -110,6 +112,44 @@ local function pad(p, l, r, t, b) local u=Instance.new("UIPadding") u.PaddingLef
 local function vlist(p, gap) local l=Instance.new("UIListLayout") l.SortOrder=Enum.SortOrder.LayoutOrder l.Padding=UDim.new(0,gap or 8) l.Parent=p return l end
 local function hlist(p, gap) local l=Instance.new("UIListLayout") l.FillDirection=Enum.FillDirection.Horizontal l.SortOrder=Enum.SortOrder.LayoutOrder l.Padding=UDim.new(0,gap or 8) l.Parent=p return l end
 local function trim(s) return s:match("^%s*(.-)%s*$") end
+function newSyncId()
+    return string.format("%.0f-%06d", os.time()*1000, math.random(0,999999))
+end
+
+SYNC_TMP_FILE = "bf_crew_sync.tmp"
+SYNC_MIRROR_FILE = "bf_crew_sync_mirror.txt"
+
+local function writeSharedSync(raw)
+    if not hasFS then return false,"file API unavailable" end
+    -- Write the replacement first, then remove the old snapshot and immediately
+    -- recreate it. This keeps the original file-based multi-instance architecture.
+    local okTmp = pcall(writefile, SYNC_TMP_FILE, raw)
+    if not okTmp then
+        pcall(function() if type(delfile)=="function" then delfile(SYNC_FILE) end end)
+        local okDirect, errDirect = pcall(writefile, SYNC_FILE, raw)
+        if not okDirect then return false, errDirect end
+        pcall(function() if type(delfile)=="function" then delfile(SYNC_TMP_FILE) end end)
+        pcall(function() if type(delfile)=="function" then delfile(SYNC_MIRROR_FILE) end end)
+        pcall(writefile, SYNC_MIRROR_FILE, raw)
+        return true
+    end
+    pcall(function() if type(delfile)=="function" then delfile(SYNC_FILE) end end)
+    local ok, err = pcall(writefile, SYNC_FILE, raw)
+    pcall(function() if type(delfile)=="function" then delfile(SYNC_TMP_FILE) end end)
+    if not ok then return false, err end
+    pcall(function() if type(delfile)=="function" then delfile(SYNC_MIRROR_FILE) end end)
+    pcall(writefile, SYNC_MIRROR_FILE, raw)
+    return true
+end
+
+local function readSharedSync()
+    if not hasFS then return "" end
+    local ok,data=pcall(readfile,SYNC_FILE)
+    if ok and type(data)=="string" and data~="" then return data end
+    local ok2,data2=pcall(readfile,SYNC_MIRROR_FILE)
+    if ok2 and type(data2)=="string" then return data2 end
+    return ""
+end
 
 -- ── Remotes ───────────────────────────────────────────────────────────────────
 local function deepFind(root, fn)
@@ -366,7 +406,7 @@ TitleLbl.TextSize=15 TitleLbl.Font=Enum.Font.GothamBold TitleLbl.TextXAlignment=
 
 local SubLbl=Instance.new("TextLabel")
 SubLbl.Size=UDim2.new(1,-180,0,13) SubLbl.Position=UDim2.new(0,56,0,34)
-SubLbl.BackgroundTransparency=1 SubLbl.Text="Made specially for ujjwal by munchdogs  •  v2.3"
+SubLbl.BackgroundTransparency=1 SubLbl.Text="World Clock Crew Sync  •  Merciful"
 SubLbl.TextColor3=THEME.SUB SubLbl.TextSize=10 SubLbl.Font=Enum.Font.Gotham
 SubLbl.TextXAlignment=Enum.TextXAlignment.Left SubLbl.ZIndex=11 SubLbl.Parent=Header
 
@@ -561,7 +601,7 @@ local function addLog(msg,color)
     e.TextXAlignment=Enum.TextXAlignment.Left e.TextTruncate=Enum.TextTruncate.AtEnd e.ZIndex=8 e.Parent=row
     task.defer(function() LogFrame.CanvasPosition=Vector2.new(0,math.huge) end)
 end
-addLog("Crew Tools loaded — ujjwal x munchdogs",THEME.ACCENT)
+addLog("Crew Tools loaded — owner: Merciful",THEME.ACCENT)
 
 InviteBtn.MouseButton1Click:Connect(function()
     if inviting then return end
@@ -588,7 +628,7 @@ end)
 -- ══════════════════════════════════════════════════════════════════════════════
 -- TAB 2  SYNC JOIN  (controls top | terminal console always-visible bottom)
 -- ══════════════════════════════════════════════════════════════════════════════
-local CTRL_H = 410  -- px height for the controls section
+local CTRL_H = 450  -- px height for the controls section
 
 local SyncPanel=Instance.new("Frame")
 SyncPanel.Size=UDim2.new(1,0,1,0) SyncPanel.BackgroundTransparency=1
@@ -621,13 +661,19 @@ CrewIdBox.Size=UDim2.new(1,-126,1,0) CrewIdBox.Position=UDim2.new(0,126,0,0)
 CrewIdBox.BackgroundColor3=THEME.CARD CrewIdBox.ZIndex=7 CrewIdBox.Parent=CrewIdRow
 corner(CrewIdBox,9) local crewIdStroke=stroke(CrewIdBox,THEME.BORDER)
 local CrewIdInput=Instance.new("TextBox")
-CrewIdInput.Size=UDim2.new(1,-16,1,0) CrewIdInput.Position=UDim2.new(0,8,0,0)
+CrewIdInput.Size=UDim2.new(1,-16,0,22) CrewIdInput.Position=UDim2.new(0,8,0,3)
 CrewIdInput.BackgroundTransparency=1 CrewIdInput.Text="" CrewIdInput.PlaceholderText="3569141797|53623713"
 CrewIdInput.PlaceholderColor3=THEME.DIM CrewIdInput.TextColor3=THEME.TEXT
 CrewIdInput.TextSize=12 CrewIdInput.Font=Enum.Font.GothamBold
 CrewIdInput.ClearTextOnFocus=false CrewIdInput.ZIndex=8 CrewIdInput.Parent=CrewIdBox
 CrewIdInput.Focused:Connect(function() tw(CrewIdBox,{BackgroundColor3=THEME.CARD2}) tw(crewIdStroke,{Color=THEME.ACCENT}) end)
 CrewIdInput.FocusLost:Connect(function() tw(CrewIdBox,{BackgroundColor3=THEME.CARD}) tw(crewIdStroke,{Color=THEME.BORDER}) end)
+
+CrewOwnerLbl=Instance.new("TextLabel")
+CrewOwnerLbl.Size=UDim2.new(1,-16,0,14) CrewOwnerLbl.Position=UDim2.new(0,8,1,-16)
+CrewOwnerLbl.BackgroundTransparency=1 CrewOwnerLbl.Text="Owner: Not detected"
+CrewOwnerLbl.TextColor3=THEME.SUCCESS CrewOwnerLbl.TextSize=9 CrewOwnerLbl.Font=Enum.Font.GothamBold
+CrewOwnerLbl.TextXAlignment=Enum.TextXAlignment.Left CrewOwnerLbl.ZIndex=9 CrewOwnerLbl.Parent=CrewIdBox
 
 local ScanCrewBtn=Instance.new("TextButton")
 ScanCrewBtn.Size=UDim2.new(1,0,0,28) ScanCrewBtn.LayoutOrder=3
@@ -667,18 +713,27 @@ RefreshBtn.ZIndex=9 RefreshBtn.Parent=StatusCard corner(RefreshBtn,6)
 
 -- ── World-clock (IST) target-time row ──────────────────────────────────────────
 local ISTRow=Instance.new("Frame")
-ISTRow.Size=UDim2.new(1,0,0,54) ISTRow.LayoutOrder=5 ISTRow.BackgroundTransparency=1 ISTRow.ZIndex=7 ISTRow.Parent=CtrlPart
+ISTRow.Size=UDim2.new(1,0,0,94) ISTRow.LayoutOrder=5 ISTRow.BackgroundTransparency=1 ISTRow.ZIndex=7 ISTRow.Parent=CtrlPart
 local ISTLbl=Instance.new("TextLabel")
-ISTLbl.Size=UDim2.new(0,118,0,18) ISTLbl.BackgroundTransparency=1 ISTLbl.Text="TARGET TIME (IST)"
+ISTLbl.Size=UDim2.new(0,118,0,18) ISTLbl.Position=UDim2.new(0,0,0,44) ISTLbl.BackgroundTransparency=1 ISTLbl.Text="TARGET TIME (IST)"
 ISTLbl.TextColor3=THEME.SUB ISTLbl.TextSize=10 ISTLbl.Font=Enum.Font.GothamBold
 ISTLbl.TextXAlignment=Enum.TextXAlignment.Left ISTLbl.ZIndex=7 ISTLbl.Parent=ISTRow
+NowClockCard=Instance.new("Frame")
+NowClockCard.Size=UDim2.new(1,0,0,40) NowClockCard.Position=UDim2.new(0,0,0,0)
+NowClockCard.BackgroundColor3=THEME.CARD NowClockCard.ZIndex=7 NowClockCard.Parent=ISTRow
+corner(NowClockCard,8) stroke(NowClockCard,THEME.ACCENT,1.2)
+NowClockTitle=Instance.new("TextLabel")
+NowClockTitle.Size=UDim2.new(0,110,1,0) NowClockTitle.Position=UDim2.new(0,12,0,0)
+NowClockTitle.BackgroundTransparency=1 NowClockTitle.Text="CURRENT IST" NowClockTitle.TextColor3=THEME.SUB
+NowClockTitle.TextSize=10 NowClockTitle.Font=Enum.Font.GothamBold NowClockTitle.TextXAlignment=Enum.TextXAlignment.Left
+NowClockTitle.ZIndex=8 NowClockTitle.Parent=NowClockCard
 local NowISTLbl=Instance.new("TextLabel")
-NowISTLbl.Size=UDim2.new(0,118,0,14) NowISTLbl.Position=UDim2.new(0,0,0,20) NowISTLbl.BackgroundTransparency=1
-NowISTLbl.Text="Now: --:--:--" NowISTLbl.TextColor3=THEME.DIM NowISTLbl.TextSize=9 NowISTLbl.Font=Enum.Font.Code
-NowISTLbl.TextXAlignment=Enum.TextXAlignment.Left NowISTLbl.ZIndex=7 NowISTLbl.Parent=ISTRow
+NowISTLbl.Size=UDim2.new(1,-126,1,0) NowISTLbl.Position=UDim2.new(0,118,0,0) NowISTLbl.BackgroundTransparency=1
+NowISTLbl.Text="--:--:--" NowISTLbl.TextColor3=THEME.SUCCESS NowISTLbl.TextSize=24 NowISTLbl.Font=Enum.Font.GothamBold
+NowISTLbl.TextXAlignment=Enum.TextXAlignment.Right NowISTLbl.ZIndex=8 NowISTLbl.Parent=NowClockCard
 
 local ISTBoxFrame=Instance.new("Frame")
-ISTBoxFrame.Size=UDim2.new(1,-126,0,40) ISTBoxFrame.Position=UDim2.new(0,126,0,0)
+ISTBoxFrame.Size=UDim2.new(1,-126,0,40) ISTBoxFrame.Position=UDim2.new(0,126,0,40)
 ISTBoxFrame.BackgroundColor3=THEME.CARD ISTBoxFrame.ZIndex=7 ISTBoxFrame.Parent=ISTRow
 corner(ISTBoxFrame,9) local istStroke=stroke(ISTBoxFrame,THEME.BORDER)
 local istPad=Instance.new("UIPadding") istPad.PaddingLeft=UDim.new(0,10) istPad.Parent=ISTBoxFrame
@@ -734,11 +789,13 @@ end
 -- live "current IST time" readout — cheap 1x/sec loop, not per-frame
 task.spawn(function()
     while true do
-        local ist = os.time() + IST_OFFSET
-        local h = math.floor(ist/3600)%24
-        local m = math.floor(ist/60)%60
-        local s = ist%60
-        NowISTLbl.Text = string.format("Now: %02d:%02d:%02d", h, m, s)
+        local ist=os.time()+IST_OFFSET
+        local h24=math.floor(ist/3600)%24
+        local m=math.floor(ist/60)%60
+        local sec=ist%60
+        local ap=h24>=12 and "PM" or "AM"
+        local h=h24%12 if h==0 then h=12 end
+        NowISTLbl.Text=string.format("%02d:%02d:%02d %s",h,m,sec,ap)
         task.wait(1)
     end
 end)
@@ -796,7 +853,7 @@ ApplyCodeBtn.TextColor3=Color3.new(1,1,1) ApplyCodeBtn.TextSize=10 ApplyCodeBtn.
 ApplyCodeBtn.ZIndex=9 ApplyCodeBtn.Parent=SyncCodeFrame corner(ApplyCodeBtn,5)
 
 local CDCard=Instance.new("Frame")
-CDCard.Size=UDim2.new(1,0,0,90) CDCard.LayoutOrder=8
+CDCard.Size=UDim2.new(1,0,0,90) CDCard.LayoutOrder=10
 CDCard.BackgroundColor3=THEME.CARD CDCard.ZIndex=7 CDCard.Parent=CtrlPart
 corner(CDCard,12) local cdStroke=stroke(CDCard,THEME.BORDER,1.5)
 local CDGlow=Instance.new("TextLabel")
@@ -838,7 +895,7 @@ end
 
 local ConsoleTitleLbl=Instance.new("TextLabel")
 ConsoleTitleLbl.Size=UDim2.new(1,-100,1,0) ConsoleTitleLbl.Position=UDim2.new(0,52,0,0)
-ConsoleTitleLbl.BackgroundTransparency=1 ConsoleTitleLbl.Text="sync_console — munchdogs"
+ConsoleTitleLbl.BackgroundTransparency=1 ConsoleTitleLbl.Text="sync_console — Merciful"
 ConsoleTitleLbl.TextColor3=Color3.fromRGB(100,110,140) ConsoleTitleLbl.TextSize=10 ConsoleTitleLbl.Font=Enum.Font.Code
 ConsoleTitleLbl.TextXAlignment=Enum.TextXAlignment.Left ConsoleTitleLbl.ZIndex=8 ConsoleTitleLbl.Parent=ConsoleHdr
 
@@ -1101,7 +1158,7 @@ local VERSIONS = {
         "One-click invite all listed players to crew",
         "Activity log with timestamps and colour-coded entries",
         "Draggable window, close button with slide-out animation",
-        "Made specially for ujjwal by munchdogs",
+        "Owner/creator: Merciful",
     }},
 }
 
@@ -1300,49 +1357,114 @@ end)
 refreshStatus()
 
 -- ── Auto-listen logic ─────────────────────────────────────────────────────────
-local isListening    = false
-local listenThread   = nil
-local lastFileStamp  = ""   -- last file content seen — only react to NEW data
+local isListening=false
+local listenThread=nil
+local lastFileStamp=""
+lastSyncId=""
+
+function encodeSyncPayload(payload)
+    return HttpService:JSONEncode(payload)
+end
+
+function decodeSyncPayload(raw)
+    local ok,data=pcall(function() return HttpService:JSONDecode(raw) end)
+    if ok and type(data)=="table" then
+        local action=tostring(data.action or "START"):upper()
+        data.action=action
+        data.syncId=tostring(data.syncId or "")
+        if action=="CANCEL" then return data end
+        if tonumber(data.targetEpoch) then
+            data.targetEpoch=math.floor(tonumber(data.targetEpoch))
+            return data
+        end
+    end
+    local crewId,ts=tostring(raw):match("^(.+)@@(%d+)$")
+    if crewId and ts then
+        return {version=1,action="START",crewId=crewId,targetEpoch=tonumber(ts),syncId="legacy-"..ts}
+    end
+    return nil
+end
+
+function makeStartPayload(crewId,target)
+    local ownerName="Unknown"
+    local ownerId=tostring(crewId):match("^(%d+)|")
+    if ownerId then
+        local pid=tonumber(ownerId)
+        local ok,name=pcall(function() return Players:GetNameFromUserIdAsync(pid) end)
+        if ok and name then ownerName=name end
+    end
+    return {version=4,action="START",owner="Merciful",crewId=crewId,crewOwner=ownerName,targetEpoch=math.floor(target),generatedAt=os.time(),syncId=newSyncId()}
+end
+
+function makeCancelPayload()
+    return {version=4,action="CANCEL",owner="Merciful",generatedAt=os.time(),syncId=newSyncId()}
+end
+
+function applyIncomingSync(payload,source)
+    local action=tostring(payload.action or "START"):upper()
+    if action=="CANCEL" then
+        resetSync()
+        addSyncLog("Synchronization detected: timer cancelled",THEME.WARN)
+        if CrewOwnerLbl then CrewOwnerLbl.Text="Owner: --" end
+        return true
+    end
+    local crewId=tostring(payload.crewId or "")
+    local target=tonumber(payload.targetEpoch)
+    if crewId=="" or not target then return false end
+    if syncActive then resetSync() end
+    CrewIdInput.Text=crewId
+    local ownerName=tostring(payload.crewOwner or "")
+    if ownerName=="" then
+        local ownerId=crewId:match("^(%d+)|")
+        if ownerId then
+            local ok,name=pcall(function() return Players:GetNameFromUserIdAsync(tonumber(ownerId)) end)
+            if ok and name then ownerName=name end
+        end
+    end
+    CrewOwnerLbl.Text="Owner: "..((ownerName~="") and ownerName or "Unknown")
+    addSyncLog("Synchronization detected",THEME.ACCENT)
+    addSyncLog("Crew: "..crewId.." • Owner: "..((ownerName~="") and ownerName or "Unknown"),THEME.SUCCESS)
+    local rem=target-os.time()
+    if rem<=0 then
+        addSyncLog("Detected sync is already expired",THEME.WARN)
+        return false
+    end
+    SyncCodeBox.Text=encodeSyncPayload(payload)
+    runSync(target,crewId,source or "Synced — joining in...")
+    return true
+end
 
 local function stopListening()
-    isListening = false
-    if listenThread then pcall(task.cancel, listenThread) listenThread = nil end
-    AutoListenBtn.Text             = "👂  AUTO"
-    AutoListenBtn.BackgroundColor3 = THEME.CARD2
-    tw(AutoListenBtn, {TextColor3 = THEME.TEXT})
-    addSyncLog("Auto-listen stopped", THEME.WARN)
+    isListening=false
+    if listenThread then pcall(task.cancel,listenThread) listenThread=nil end
+    AutoListenBtn.Text="👂  AUTO"
+    AutoListenBtn.BackgroundColor3=THEME.CARD2
+    tw(AutoListenBtn,{TextColor3=THEME.TEXT})
+    addSyncLog("Auto-listen stopped",THEME.WARN)
 end
 
 local function startListening()
     if isListening then return end
     if not hasFS then
-        addSyncLog("Auto-listen needs writefile/readfile — not in this executor", THEME.ERROR)
+        addSyncLog("Auto-listen needs writefile/readfile — not in this executor",THEME.ERROR)
         return
     end
-    isListening = true
-    AutoListenBtn.Text             = "⏹  STOP"
-    AutoListenBtn.BackgroundColor3 = Color3.fromRGB(160, 30, 30)
-    tw(AutoListenBtn, {TextColor3 = Color3.new(1,1,1)})
-    addSyncLog("Auto-listen ON — waiting for SET SYNC from main account...", THEME.SUCCESS)
-
-    listenThread = task.spawn(function()
+    isListening=true
+    AutoListenBtn.Text="⏹  STOP"
+    AutoListenBtn.BackgroundColor3=Color3.fromRGB(160,30,30)
+    tw(AutoListenBtn,{TextColor3=Color3.new(1,1,1)})
+    addSyncLog("Auto-listen ON — watching for NEW sync snapshots...",THEME.SUCCESS)
+    listenThread=task.spawn(function()
         while isListening do
-            task.wait(0.8)
-            if not syncActive then
-                local ok, data = pcall(readfile, SYNC_FILE)
-                if ok and data and data ~= "" and data ~= lastFileStamp then
-                    lastFileStamp = data
-                    local crewId, target = parseSyncCode(data)
-                    if crewId and target then
-                        local rem = target - os.time()
-                        if rem >= 1 then
-                            SyncCodeBox.Text = data
-                            CrewIdInput.Text = crewId
-                            addSyncLog("AUTO-DETECTED — joining in "..math.floor(rem).."s", THEME.SUCCESS)
-                            runSync(target, crewId, "Auto-detected — joining in...")
-                        else
-                            addSyncLog("Detected sync but already expired — wait for fresh one", THEME.WARN)
-                        end
+            task.wait(0.20)
+            local okRead,data=pcall(readSharedSync)
+            if okRead and data~="" and data~=lastFileStamp then
+                lastFileStamp=data
+                local payload=decodeSyncPayload(data)
+                if payload and payload.syncId~=lastSyncId then
+                    lastSyncId=payload.syncId
+                    if SCRIPT_READY then
+                        applyIncomingSync(payload,"Shared sync detected")
                     end
                 end
             end
@@ -1355,19 +1477,34 @@ AutoListenBtn.MouseButton1Click:Connect(function()
 end)
 
 -- wire up the Scan button (defined in UI section, used here)
+function showCrewOwner(id)
+    local ownerName="Unknown"
+    local ownerId=tostring(id or ""):match("^(%d+)|")
+    if ownerId then
+        local pid=tonumber(ownerId)
+        local ok,name=pcall(function() return Players:GetNameFromUserIdAsync(pid) end)
+        if ok and name then ownerName=name end
+    end
+    CrewOwnerLbl.Text="Owner: "..ownerName
+    addSyncLog("Crew detected: "..tostring(id).." • Owner: "..ownerName,THEME.SUCCESS)
+    return ownerName
+end
+
 ScanCrewBtn.MouseButton1Click:Connect(function()
     addSyncLog("Scanning for Crew ID...", THEME.ACCENT)
     local id = scanCrewId(addSyncLog)
     if id then
         CrewIdInput.Text = id
+        showCrewOwner(id)
         addSyncLog("Auto-filled: "..id, THEME.SUCCESS)
     end
 end)
 
 -- parse a sync code string — format: "crewId@@timestamp"
 parseSyncCode = function(raw)
-    local crewId, ts = raw:match("^(.+)@@(%d+)$")
-    return crewId, tonumber(ts)
+    local d=decodeSyncPayload(raw)
+    if not d then return nil,nil,nil end
+    return d.crewId,tonumber(d.targetEpoch),d
 end
 
 CopyCodeBtn.MouseButton1Click:Connect(function()
@@ -1382,71 +1519,79 @@ CopyCodeBtn.MouseButton1Click:Connect(function()
 end)
 
 ApplyCodeBtn.MouseButton1Click:Connect(function()
-    if syncActive then resetSync() addSyncLog("Cancelled",THEME.WARN) return end
     local raw = SyncCodeBox.Text:match("^%s*(.-)%s*$")
-    if raw == "" then addSyncLog("Paste a sync code into the box first", THEME.ERROR) return end
-    local crewId, target = parseSyncCode(raw)
-    if not crewId or not target then addSyncLog("Invalid sync code format", THEME.ERROR) return end
-    local rem = target - os.time()
-    if rem <= 0 then addSyncLog("Sync code already expired — get a fresh one", THEME.ERROR) return end
-    CrewIdInput.Text = crewId
-    addSyncLog("Applied code — Crew: "..crewId.." — joining in "..rem.."s", THEME.ACCENT)
-    runSync(target, crewId, "Code applied — joining in...")
+    if raw=="" then addSyncLog("Paste a sync code into the box first",THEME.ERROR) return end
+    local crewId,target,payload=parseSyncCode(raw)
+    if not crewId or not target then addSyncLog("Invalid sync code format",THEME.ERROR) return end
+    local rem=target-os.time()
+    if rem<=0 then addSyncLog("Sync code already expired — get a fresh one",THEME.ERROR) return end
+    if syncActive then resetSync() end
+    SyncCodeBox.Text=raw
+    CrewIdInput.Text=crewId
+    showCrewOwner(crewId)
+    addSyncLog("Applied code — Crew: "..crewId.." — joining in "..rem.."s",THEME.ACCENT)
+    runSync(target,crewId,"Code applied — joining in...")
 end)
 
 SetSyncBtn.MouseButton1Click:Connect(function()
-    if syncActive then resetSync() addSyncLog("Cancelled",THEME.WARN) return end
-    local crewId = CrewIdInput.Text:match("^%s*(.-)%s*$")
-    if crewId == "" then addSyncLog("Enter or scan a Crew ID first", THEME.ERROR) return end
-    local target = getISTTargetTimestamp()
-    local rem = target - os.time()
-    local code = crewId.."@@"..tostring(target)
-    -- display code so user can copy-paste to other instances
-    SyncCodeBox.Text = code
-    -- also write file as backup (same executor path = works; different = fall back to manual)
+    local crewId=CrewIdInput.Text:match("^%s*(.-)%s*$")
+    if crewId=="" then addSyncLog("Enter or scan a Crew ID first",THEME.ERROR) return end
+    local target=getISTTargetTimestamp()
+    local payload=makeStartPayload(crewId,target)
+    local raw=encodeSyncPayload(payload)
+    SyncCodeBox.Text=raw
     if hasFS then
-        local ok, err = pcall(writefile, SYNC_FILE, code)
-        addSyncLog(ok and "File written + code shown below" or "File write failed: "..tostring(err), ok and THEME.SUB or THEME.WARN)
+        local ok,err=writeSharedSync(raw)
+        if not ok then addSyncLog("Sync file write failed: "..tostring(err),THEME.ERROR) return end
+        lastFileStamp=raw
+        lastSyncId=payload.syncId
+        addSyncLog(syncActive and "Previous sync replaced — new workspace snapshot written" or "Workspace sync data written",THEME.SUCCESS)
     end
-    -- auto-copy to clipboard
-    if type(setclipboard) == "function" then
-        pcall(setclipboard, code)
-        addSyncLog("Code auto-copied to clipboard — paste on other instances", THEME.ACCENT)
-    else
-        addSyncLog("Copy the code from the box below to other instances", THEME.ACCENT)
-    end
-    addSyncLog(string.format("Target set: %02d:%02d:%02d IST — joining in %ds",
-        math.floor(((target+IST_OFFSET)%86400)/3600), math.floor(((target+IST_OFFSET)%3600)/60), (target+IST_OFFSET)%60, rem), THEME.TEXT)
-    runSync(target, crewId, "Joining in...")
+    if syncActive then resetSync() end
+    showCrewOwner(crewId)
+    if type(setclipboard)=="function" then pcall(setclipboard,raw) end
+    local rem=target-os.time()
+    addSyncLog(string.format("Target set: %02d:%02d:%02d IST — joining in %ds",math.floor(((target+IST_OFFSET)%86400)/3600),math.floor(((target+IST_OFFSET)%3600)/60),(target+IST_OFFSET)%60,rem),THEME.TEXT)
+    runSync(target,crewId,"Joining in...")
 end)
 
 LoadSyncBtn.MouseButton1Click:Connect(function()
-    if syncActive then resetSync() addSyncLog("Cancelled",THEME.WARN) return end
-    -- 1. try file
-    local code = ""
+    local raw=readSharedSync()
+    if raw=="" then raw=SyncCodeBox.Text:match("^%s*(.-)%s*$") end
+    if raw=="" then addSyncLog("No sync data found",THEME.ERROR) return end
+    local payload=decodeSyncPayload(raw)
+    if not payload then addSyncLog("Invalid sync data",THEME.ERROR) return end
+    lastFileStamp=raw
+    lastSyncId=tostring(payload.syncId or "")
+    SyncCodeBox.Text=raw
+    if tostring(payload.action or "START"):upper()=="CANCEL" then
+        resetSync()
+        addSyncLog("Loaded shared CANCEL state",THEME.WARN)
+        return
+    end
+    applyIncomingSync(payload,"Shared settings loaded")
+end)
+
+-- Dedicated distributed-cancel button.
+CancelSyncBtn=Instance.new("TextButton")
+CancelSyncBtn.Size=UDim2.new(1,0,0,30) CancelSyncBtn.LayoutOrder=9
+CancelSyncBtn.BackgroundColor3=THEME.CARD2 CancelSyncBtn.Text="✖  CANCEL SYNC FOR ALL INSTANCES"
+CancelSyncBtn.TextColor3=THEME.ERROR CancelSyncBtn.TextSize=10 CancelSyncBtn.Font=Enum.Font.GothamBold
+CancelSyncBtn.ZIndex=8 CancelSyncBtn.Parent=CtrlPart corner(CancelSyncBtn,8) stroke(CancelSyncBtn,THEME.ERROR)
+CancelSyncBtn.MouseButton1Click:Connect(function()
+    local payload=makeCancelPayload()
+    local raw=encodeSyncPayload(payload)
     if hasFS then
-        local ok, data = pcall(readfile, SYNC_FILE)
-        if ok and data and data ~= "" then code = data end
+        local ok,err=writeSharedSync(raw)
+        if not ok then addSyncLog("Cancel sync write failed: "..tostring(err),THEME.ERROR) return end
+        lastFileStamp=raw
+        lastSyncId=payload.syncId
+        addSyncLog("Previous sync deleted/replaced with CANCEL snapshot — all listeners will cancel",THEME.WARN)
+    else
+        addSyncLog("No file API — cancellation cannot be propagated",THEME.WARN)
     end
-    -- 2. fall back to whatever is in the code box
-    if code == "" then
-        code = SyncCodeBox.Text:match("^%s*(.-)%s*$")
-    end
-    if code == "" then
-        addSyncLog("No sync code found — paste code into the box or run SET SYNC on main first", THEME.ERROR)
-        return
-    end
-    local crewId, target = parseSyncCode(code)
-    if not crewId or not target then
-        addSyncLog("Invalid code format — re-run SET SYNC on main instance", THEME.ERROR)
-        return
-    end
-    local rem = target - os.time()
-    if rem <= 0 then addSyncLog("Sync already passed — set a new one", THEME.ERROR) return end
-    CrewIdInput.Text = crewId
-    SyncCodeBox.Text = code
-    addSyncLog("Loaded — Crew: "..crewId.." — joining in "..rem.."s", THEME.ACCENT)
-    runSync(target, crewId, "Synced — joining in...")
+    resetSync()
+    addSyncLog("Timer cancelled locally and published globally",THEME.WARN)
 end)
 
 -- ── Tab switch ────────────────────────────────────────────────────────────────
@@ -1569,8 +1714,16 @@ end)
 Window.Position=UDim2.new(0.5,-W/2,-0.9,0)
 tw(Window,{Position=UDim2.new(0.5,-W/2,0.5,-H/2),BackgroundTransparency=0},0.5,Enum.EasingStyle.Back)
 
--- start the watcher automatically once the GUI is fully wired up
+-- Establish an initial baseline BEFORE starting the watcher so an old snapshot
+-- never arms the timer automatically when this script first loads.
 if hasFS then
+    local existing=readSharedSync()
+    if existing~="" then
+        lastFileStamp=existing
+        local baseline=decodeSyncPayload(existing)
+        lastSyncId=baseline and tostring(baseline.syncId or "") or ""
+        addSyncLog("Existing sync snapshot found — waiting for a NEW sync event",THEME.DIM)
+    end
     startListening()
 end
 
@@ -1669,7 +1822,7 @@ task.spawn(function()
     local attempts = 0
     repeat
         pressButton()
-        task.wait(2)
+        task.wait(0.25)
         attempts = attempts + 1
         if attempts % 8 == 0 then
             print("[AutoJoin] Still waiting for spawn... (" .. attempts .. " attempts)")

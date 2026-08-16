@@ -44,6 +44,20 @@ local function PerformanceMode()
     if setfpscap then
         pcall(setfpscap, 10)
     end
+
+    -- Keep the client capped at exactly 10 FPS for the whole session.
+    -- Some environments can reset the cap, so re-apply it periodically.
+    task.spawn(function()
+        while true do
+            pcall(function()
+                if setfpscap then
+                    setfpscap(10)
+                end
+            end)
+            task.wait(1)
+        end
+    end)
+
     task.spawn(function()
         pcall(function() RunService:Set3dRenderingEnabled(false) end)
     end)
@@ -366,6 +380,19 @@ local Gui = Instance.new("ScreenGui")
 Gui.Name="CrewToolsGui" Gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
 Gui.ResetOnSpawn=false Gui.IgnoreGuiInset=true Gui.Parent=LocalPlayer.PlayerGui
 
+-- Full-screen black backdrop.
+-- It is a separate sibling behind the script window, so it never covers the UI.
+local BlackBackground = Instance.new("Frame")
+BlackBackground.Name = "BlackBackground"
+BlackBackground.Size = UDim2.new(1,0,1,0)
+BlackBackground.Position = UDim2.new(0,0,0,0)
+BlackBackground.BackgroundColor3 = Color3.new(0,0,0)
+BlackBackground.BackgroundTransparency = 0
+BlackBackground.BorderSizePixel = 0
+BlackBackground.ZIndex = 0
+BlackBackground.Active = false
+BlackBackground.Parent = Gui
+
 local Window = Instance.new("Frame")
 Window.Name="Window"
 Window.Size=UDim2.new(0,W,0,H)
@@ -374,6 +401,7 @@ Window.BackgroundColor3=THEME.BG
 Window.BorderSizePixel=0
 Window.ClipsDescendants=true
 Window.BackgroundTransparency=1
+Window.ZIndex=1
 Window.Parent=Gui
 corner(Window,18)
 local winStroke = stroke(Window, THEME.BORDER, 1.5)

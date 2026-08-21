@@ -41,6 +41,23 @@ local THEME = {
 -- Runs once at script start, before the GUI is built.
 -- ══════════════════════════════════════════════════════════════════════════════
 local function PerformanceMode()
+    -- Use the same FPS-cap API as the original script.
+    -- Re-apply continuously so another script/executor reset cannot leave it uncapped.
+    local function force10FPS()
+        pcall(function()
+            if type(setfpscap) == "function" then
+                setfpscap(10)
+            end
+        end)
+    end
+
+    force10FPS()
+    task.spawn(function()
+        while task.wait(0.25) do
+            force10FPS()
+        end
+    end)
+
     if setfpscap then
         pcall(setfpscap, 10)
     end
@@ -118,6 +135,8 @@ end
 
 SYNC_TMP_FILE = "bf_crew_sync.tmp"
 SYNC_MIRROR_FILE = "bf_crew_sync_mirror.txt"
+CREW_REGISTER_FILE = "bf_crew_register.txt"
+CREW_REGISTER_MIRROR_FILE = "bf_crew_register_mirror.txt"
 
 local function writeSharedSync(raw)
     if not hasFS then return false,"file API unavailable" end
@@ -147,6 +166,26 @@ local function readSharedSync()
     local ok,data=pcall(readfile,SYNC_FILE)
     if ok and type(data)=="string" and data~="" then return data end
     local ok2,data2=pcall(readfile,SYNC_MIRROR_FILE)
+    if ok2 and type(data2)=="string" then return data2 end
+    return ""
+end
+
+-- Crew-ID registration is separate from the timer snapshot.
+-- This means pressing Auto-Scan on ONE instance publishes the discovered ID
+-- without starting/replacing a sync timer on the other instances.
+local function writeCrewRegistration(raw)
+    if not hasFS then return false,"file API unavailable" end
+    local ok,err=pcall(writefile,CREW_REGISTER_FILE,raw)
+    if not ok then return false,err end
+    pcall(writefile,CREW_REGISTER_MIRROR_FILE,raw)
+    return true
+end
+
+local function readCrewRegistration()
+    if not hasFS then return "" end
+    local ok,data=pcall(readfile,CREW_REGISTER_FILE)
+    if ok and type(data)=="string" and data~="" then return data end
+    local ok2,data2=pcall(readfile,CREW_REGISTER_MIRROR_FILE)
     if ok2 and type(data2)=="string" then return data2 end
     return ""
 end
@@ -364,7 +403,20 @@ if old then old:Destroy() end
 
 local Gui = Instance.new("ScreenGui")
 Gui.Name="CrewToolsGui" Gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
-Gui.ResetOnSpawn=false Gui.IgnoreGuiInset=true Gui.Parent=LocalPlayer.PlayerGui
+Gui.ResetOnSpawn=false Gui.IgnoreGuiInset=true Gui.Parent=LocalPlayer:WaitForChild("PlayerGui", 30)
+
+-- Full-screen black backdrop.
+-- It is a separate sibling behind the script window, so it never covers the UI.
+local BlackBackground = Instance.new("Frame")
+BlackBackground.Name = "BlackBackground"
+BlackBackground.Size = UDim2.new(1,0,1,0)
+BlackBackground.Position = UDim2.new(0,0,0,0)
+BlackBackground.BackgroundColor3 = Color3.new(0,0,0)
+BlackBackground.BackgroundTransparency = 0
+BlackBackground.BorderSizePixel = 0
+BlackBackground.ZIndex = 0
+BlackBackground.Active = false
+BlackBackground.Parent = Gui
 
 local Window = Instance.new("Frame")
 Window.Name="Window"
@@ -374,6 +426,7 @@ Window.BackgroundColor3=THEME.BG
 Window.BorderSizePixel=0
 Window.ClipsDescendants=true
 Window.BackgroundTransparency=1
+Window.ZIndex=1
 Window.Parent=Gui
 corner(Window,18)
 local winStroke = stroke(Window, THEME.BORDER, 1.5)
@@ -1360,6 +1413,7 @@ refreshStatus()
 local isListening=false
 local listenThread=nil
 local lastFileStamp=""
+local lastRegisterStamp=""
 lastSyncId=""
 
 function encodeSyncPayload(payload)
@@ -1372,7 +1426,7 @@ function decodeSyncPayload(raw)
         local action=tostring(data.action or "START"):upper()
         data.action=action
         data.syncId=tostring(data.syncId or "")
-        if action=="CANCEL" then return data end
+        if action=="CANCEL" or action=="REGISTER" then return data end
         if tonumber(data.targetEpoch) then
             data.targetEpoch=math.floor(tonumber(data.targetEpoch))
             return data
@@ -1400,8 +1454,21 @@ function makeCancelPayload()
     return {version=4,action="CANCEL",owner="Merciful",generatedAt=os.time(),syncId=newSyncId()}
 end
 
+function makeRegisterPayload(crewId)
+    return {version=4,action="REGISTER",owner="Merciful",crewId=tostring(crewId),generatedAt=os.time(),syncId=newSyncId()}
+end
+
 function applyIncomingSync(payload,source)
     local action=tostring(payload.action or "START"):upper()
+    if action=="REGISTER" then
+        local crewId=tostring(payload.crewId or "")
+        if crewId=="" then return false end
+        CrewIdInput.Text=crewId
+        showCrewOwner(crewId)
+        SyncCodeBox.Text=encodeSyncPayload(payload)
+        addSyncLog("Crew ID registered from another instance: "..crewId,THEME.SUCCESS)
+        return true
+    end
     if action=="CANCEL" then
         resetSync()
         addSyncLog("Synchronization detected: timer cancelled",THEME.WARN)
@@ -1457,6 +1524,22 @@ local function startListening()
     listenThread=task.spawn(function()
         while isListening do
             task.wait(0.20)
+
+            -- Watch the dedicated Crew-ID registration file. This is intentionally
+            -- separate from the timer file so Auto-Scan propagates immediately.
+            local okReg,regRaw=pcall(readCrewRegistration)
+            if okReg and regRaw~="" and regRaw~=lastRegisterStamp then
+                lastRegisterStamp=regRaw
+                local regPayload=decodeSyncPayload(regRaw)
+                if regPayload and regPayload.action=="REGISTER" and regPayload.syncId~=lastSyncId then
+                    lastSyncId=regPayload.syncId
+                    if SCRIPT_READY then
+                        applyIncomingSync(regPayload,"Crew ID registered from another instance")
+                    end
+                end
+            end
+
+            -- Watch the normal timer/cancel snapshot.
             local okRead,data=pcall(readSharedSync)
             if okRead and data~="" and data~=lastFileStamp then
                 lastFileStamp=data
@@ -1497,6 +1580,22 @@ ScanCrewBtn.MouseButton1Click:Connect(function()
         CrewIdInput.Text = id
         showCrewOwner(id)
         addSyncLog("Auto-filled: "..id, THEME.SUCCESS)
+
+        -- Publish the scan result so every other running instance auto-fills
+        -- its Crew ID without needing LOAD/APPLY or a manual paste.
+        if hasFS then
+            local payload=makeRegisterPayload(id)
+            local raw=encodeSyncPayload(payload)
+            local ok,err=writeCrewRegistration(raw)
+            if ok then
+                lastRegisterStamp=raw
+                addSyncLog("Crew ID registered to all listening instances",THEME.SUCCESS)
+            else
+                addSyncLog("Crew ID registration failed: "..tostring(err),THEME.ERROR)
+            end
+        else
+            addSyncLog("No file API — cannot broadcast Crew ID to other instances",THEME.WARN)
+        end
     end
 end)
 
@@ -1620,6 +1719,14 @@ end
 -- SYNC is the default tab on load
 switchTab("sync")
 refreshStatus()
+-- The GUI is already built and parented before performance rendering is reduced.
+task.delay(1, function()
+    pcall(function()
+        if RunService.Set3dRenderingEnabled then
+            RunService:Set3dRenderingEnabled(false)
+        end
+    end)
+end)
 
 TabInviter.MouseButton1Click:Connect(function()  switchTab("inviter")  end)
 TabSync.MouseButton1Click:Connect(function()     switchTab("sync") refreshStatus() end)
@@ -1724,6 +1831,13 @@ if hasFS then
         lastSyncId=baseline and tostring(baseline.syncId or "") or ""
         addSyncLog("Existing sync snapshot found — waiting for a NEW sync event",THEME.DIM)
     end
+
+    local existingRegister=readCrewRegistration()
+    if existingRegister~="" then
+        lastRegisterStamp=existingRegister
+        addSyncLog("Existing Crew ID registration found — waiting for a NEW registration",THEME.DIM)
+    end
+
     startListening()
 end
 

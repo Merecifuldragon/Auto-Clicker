@@ -124,7 +124,7 @@ if tostring(CONFIG.Key or ""):lower() ~= REQUIRED_KEY:lower() then
         detail.TextSize = 10
         detail.TextColor3 = Color3.fromRGB(255, 195, 200)
         detail.TextXAlignment = Enum.TextXAlignment.Center
-        detail.Text = "Check your key and try again."
+        detail.Text = "Suck My Dick Nigger"
         detail.Parent = frame
 
         -- Remove the error banner automatically after 10 seconds.

@@ -41,7 +41,7 @@ local CONFIG = {
     WebhookURL       = ENV.webhook or "",
     Key              = ENV.key or "",
 
-    SendEvery        = 60,
+    SendEvery        = 600,
     InventoryRefresh = 15,
     EditSameMessage  = false,
     ShowPanel        = true,

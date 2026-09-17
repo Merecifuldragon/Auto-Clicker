@@ -57,7 +57,7 @@ local CONFIG = {
 -- KEY CHECK
 -- Case-insensitive. Change REQUIRED_KEY to whatever key you hand out.
 -- ================================================================
-local REQUIRED_KEY = "MercifulPapa"
+local REQUIRED_KEY = "MercifulCutie"
 
 if CONFIG.WebhookURL == "" then
     warn("[BF Webhook] No webhook set. Set `webhook = \"...\"` before the loadstring. Script stopped.")

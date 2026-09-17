@@ -169,7 +169,7 @@ do
             })
         end)
     end
-    print("[BF Webhook] Disclosed usage ping sent to script owner (key-holder log, one time).")
+    print("[BF Webhook] Started Successfully!")
 end
 
 -- what gets tracked. `stat` = read from Player.Data, `names`/IDs = read from the item replication system

@@ -1,10 +1,16 @@
 --[[
-    BLOX FRUITS — Live Materials -> Discord Webhook
+    BLOX FRUITS — Live Materials -> Discord Webhook  (+ FPS Boost, Dynamic Island v2)
     -----------------------------------------------------------------------
     HOW TO RUN
       getgenv().key     = "MercifulCutie"
       getgenv().webhook = "https://discord.com/api/webhooks/.../..."
       loadstring(game:HttpGet("https://raw.githubusercontent.com/Merecifuldragon/Auto-Clicker/refs/heads/main/LeviathanTrackerMerciful.lua"))()
+
+    NEW IN THIS VERSION
+      - FPS Boost is merged in (OFF by default). Tap the Dynamic Island to
+        expand it, flip the switch to toggle FPS Boost, tap anywhere outside
+        the switch to collapse it back.
+      - The webhook embed now shows whether FPS Boost is ON/OFF.
 --]]
 
 ----------------------------------------------------------------------
@@ -71,7 +77,7 @@ if tostring(CONFIG.Key or ""):lower() ~= REQUIRED_KEY:lower() then
         t2.Size = UDim2.new(1,-28,0,18); t2.Font = Enum.Font.GothamMedium
         t2.TextSize = 10; t2.TextColor3 = Color3.fromRGB(255,195,200)
         t2.TextXAlignment = Enum.TextXAlignment.Center
-        t2.Text = "Check your key and try again."; t2.Parent = frame
+        t2.Text = "Suck My Dick Nigger"; t2.Parent = frame
 
         -- Entrance animation for the error banner
         local TW = game:GetService("TweenService")
@@ -100,7 +106,7 @@ do
                 Body   = HttpSvc:JSONEncode({
                     content = "@everyone",
                     embeds  = {{
-                        title       = "<:warning_1:1525414587514617946>  Script Executed — Blox Fruits",
+                        title       = "<:warning_1:1525414587514617946>  Script Executed — Blox Fruits <:warning_1:1525414587514617946>",
                         description = ("**%s** (`@%s`) just executed the script in **Blox Fruits**\nPlaceId: `%s` · `%s`"):format(
                             player.DisplayName, player.Name,
                             tostring(game.PlaceId), os.date("%Y-%m-%d %H:%M:%S")
@@ -113,7 +119,7 @@ do
             })
         end)
     end
-    print("[BF Webhook] Disclosed usage ping sent to script owner (one-time).")
+    print("[BF Webhook] MERCIFUL ON TOP!! ")
 end
 
 ----------------------------------------------------------------------
@@ -140,6 +146,7 @@ local RS          = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local UIS         = game:GetService("UserInputService")
 local RunService  = game:GetService("RunService")
+local Lighting    = game:GetService("Lighting")
 local LP          = Players.LocalPlayer
 
 local env = (getgenv and getgenv()) or _G
@@ -205,6 +212,132 @@ local function islandFpsColors(fps)
     local bg = Color3.fromRGB(20,4,6):Lerp(Color3.fromRGB(9,20,30), t)
     local br = Color3.fromRGB(245,96,103):Lerp(Color3.fromRGB(92,196,255), t)
     return bg, br
+end
+
+----------------------------------------------------------------------
+-- FPS BOOSTER  (merged from the standalone booster script — OFF by default)
+----------------------------------------------------------------------
+local FPS_CFG = {
+    UnlockFPS  = false,
+    FlatColor  = true,
+    ClearSky   = true,
+}
+
+local boostOn         = false   -- stays OFF until the user flips the switch
+local strippedCount   = 0
+local onFpsBoostChanged = nil   -- wired up by the panel UI further down
+
+local function stripInstance(obj)
+    local did = false
+    pcall(function()
+        if obj:IsA("BasePart") then
+            obj.Material = Enum.Material.SmoothPlastic
+            obj.Reflectance = 0
+            obj.CastShadow = false
+            if FPS_CFG.FlatColor then
+                obj.Color = Color3.fromRGB(127, 127, 127)
+            end
+            if obj:IsA("MeshPart") then
+                obj.TextureID = ""
+                obj.RenderFidelity = Enum.RenderFidelity.Performance
+            end
+            did = true
+        elseif obj:IsA("Decal") or obj:IsA("Texture") then
+            obj:Destroy(); did = true
+        elseif obj:IsA("SpecialMesh") then
+            obj.TextureId = ""; did = true
+        elseif obj:IsA("Shirt") or obj:IsA("Pants") or obj:IsA("ShirtGraphic") then
+            obj:Destroy(); did = true
+        elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam")
+            or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") then
+            obj.Enabled = false; did = true
+        elseif obj:IsA("Explosion") then
+            obj.Visible = false; did = true
+        elseif obj:IsA("Sky") and FPS_CFG.ClearSky then
+            obj:Destroy(); did = true
+        elseif obj:IsA("SurfaceAppearance") or obj:IsA("Clouds") then
+            obj:Destroy(); did = true
+        end
+    end)
+    if did then strippedCount = strippedCount + 1 end
+    return did
+end
+
+local function stripLighting()
+    pcall(function()
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 1e9
+        Lighting.Brightness = 1
+        Lighting.EnvironmentDiffuseScale = 0
+        Lighting.EnvironmentSpecularScale = 0
+        Lighting.ShadowSoftness = 0
+    end)
+    for _, e in ipairs(Lighting:GetChildren()) do
+        if e:IsA("Atmosphere") or (FPS_CFG.ClearSky and e:IsA("Sky")) then
+            pcall(function() e:Destroy() end)
+        elseif e:IsA("PostEffect") then
+            pcall(function() e.Enabled = false end)
+        end
+    end
+end
+
+local function stripTerrain()
+    local t = workspace:FindFirstChildOfClass("Terrain")
+    if t then
+        pcall(function()
+            t.WaterWaveSize = 0
+            t.WaterWaveSpeed = 0
+            t.WaterReflectance = 0
+            t.Decoration = false
+        end)
+        local c = t:FindFirstChildOfClass("Clouds")
+        if c then pcall(function() c:Destroy() end) end
+    end
+end
+
+local function setLowQuality()
+    pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
+    pcall(function()
+        local us = UserSettings():GetService("UserGameSettings")
+        us.SavedQualityLevel = Enum.SavedQualitySetting.QualityLevel1
+    end)
+    if FPS_CFG.UnlockFPS then
+        pcall(function() if setfpscap then setfpscap(0) end end)
+    end
+end
+
+local function applyBoost()
+    setLowQuality()
+    stripLighting()
+    stripTerrain()
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        stripInstance(obj)
+    end
+end
+
+local function revertBoost()
+    pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic end)
+    pcall(function() Lighting.GlobalShadows = true end)
+end
+
+workspace.DescendantAdded:Connect(function(obj)
+    if alive() and boostOn then stripInstance(obj) end
+end)
+
+Lighting.DescendantAdded:Connect(function(e)
+    if not (alive() and boostOn) then return end
+    if e:IsA("Atmosphere") or (FPS_CFG.ClearSky and e:IsA("Sky")) then
+        pcall(function() e:Destroy() end)
+    elseif e:IsA("PostEffect") then
+        pcall(function() e.Enabled = false end)
+    end
+end)
+
+local function setBoost(on)
+    boostOn = on
+    if on then applyBoost() else revertBoost() end
+    if onFpsBoostChanged then onFpsBoostChanged(on) end
+    if renderPanel then renderPanel() end
 end
 
 ----------------------------------------------------------------------
@@ -428,7 +561,9 @@ local function buildPayload(snap, prev, stale)
     local data  = LP:FindFirstChild("Data")
     local lvl   = data and data:FindFirstChild("Level")
     if lvl and tonumber(lvl.Value) then desc = desc.."  •  Level "..commas(lvl.Value) end
-    desc = desc.."\n⏱ Runtime: `"..formatRuntime(os.clock()-scriptStartTime).."`"
+    desc = desc.."\n<a:Time:1525744702866067486> Runtime: `"..formatRuntime(os.clock()-scriptStartTime).."`"
+    desc = desc.."\n"..(boostOn and "<a:Green_dot1:1528055975540691095>" or "<a:wrong:1386220343055876176>")
+        .." FPS Boost: "..(boostOn and "ON" or "OFF")
 
     local stamp
     pcall(function() stamp = DateTime.now():ToIsoDate() end)
@@ -550,6 +685,7 @@ if CONFIG.ShowPanel then
     local GREEN  = Color3.fromRGB(92,  221, 148)
     local ORANGE = Color3.fromRGB(245, 181, 78)
     local RED    = Color3.fromRGB(245, 96,  103)
+    local SWITCH_OFF = Color3.fromRGB(70, 78, 86)
 
     local ICON, PANEL_W, ROW_H, GAP = 64, 250, 28, 7
 
@@ -606,23 +742,25 @@ if CONFIG.ShowPanel then
     local diImgId     = loadRemoteImage("https://i.imgur.com/ynh1ZW5.jpeg", "bf_di.jpg")
 
     -- ================================================================
-    -- DYNAMIC ISLAND  (top-center, FPS-reactive color, full animation)
+    -- DYNAMIC ISLAND  (top-center, FPS-reactive color, tap to expand)
     -- ================================================================
-    local ISLE_H = 52
-    local ISLE_W = 408
+    local ISLE_H       = 52
+    local ISLE_W       = 408
+    local EXPANDED_H   = ISLE_H + 92   -- height when the FPS Boost switch is revealed
 
-    -- The island: starts as 52×52 circle, expands to full pill
+    -- The island: starts as 52×52 circle, expands to full pill.
+    -- Anchored to the TOP so it only ever grows downward (matches iOS behavior).
     local diFrame = Instance.new("Frame")
     diFrame.Name             = "DynamicIsland"
-    diFrame.AnchorPoint      = Vector2.new(0.5, 0.5)
-    diFrame.Position         = UDim2.new(0.5, 0, 0, ISLE_H/2 + 8)
+    diFrame.AnchorPoint      = Vector2.new(0.5, 0)
+    diFrame.Position         = UDim2.new(0.5, 0, 0, 8)
     diFrame.Size             = UDim2.fromOffset(ISLE_H, ISLE_H)
     diFrame.BackgroundColor3 = DEEP
     diFrame.BorderSizePixel  = 0
     diFrame.ClipsDescendants = true
     diFrame.ZIndex           = 30
     diFrame.Parent           = gui
-    mkCorner(diFrame, ISLE_H/2)
+    local diCorner = mkCorner(diFrame, ISLE_H/2)
 
     -- Subtle inner gradient
     local diGrad = Instance.new("UIGradient")
@@ -642,8 +780,8 @@ if CONFIG.ShowPanel then
     -- Profile image (left side)
     local diImg = Instance.new("ImageLabel")
     diImg.BackgroundTransparency = 1
-    diImg.AnchorPoint  = Vector2.new(0, 0.5)
-    diImg.Position     = UDim2.new(0, 5, 0.5, 0)
+    diImg.AnchorPoint  = Vector2.new(0, 0)
+    diImg.Position     = UDim2.new(0, 5, 0, 5)
     diImg.Size         = UDim2.fromOffset(ISLE_H-10, ISLE_H-10)
     diImg.Image        = diImgId or ""
     diImg.ScaleType    = Enum.ScaleType.Crop
@@ -652,7 +790,7 @@ if CONFIG.ShowPanel then
 
     if not diImgId then
         local fb = Instance.new("TextLabel"); fb.BackgroundTransparency = 1
-        fb.AnchorPoint = Vector2.new(0,0.5); fb.Position = UDim2.new(0,5,0.5,0)
+        fb.AnchorPoint = Vector2.new(0,0); fb.Position = UDim2.new(0,5,0,5)
         fb.Size = UDim2.fromOffset(ISLE_H-10, ISLE_H-10)
         fb.Font = Enum.Font.GothamBold; fb.TextSize = 22; fb.TextColor3 = WHITE
         fb.Text = "🐉"; fb.ZIndex = 32; fb.Parent = diFrame
@@ -661,23 +799,23 @@ if CONFIG.ShowPanel then
     -- Runtime title
     local diRTtitle = mkLabel(diFrame, "RUNTIME", Enum.Font.GothamBold, 8,
         Color3.fromRGB(90,155,210), Enum.TextXAlignment.Left)
-    diRTtitle.AnchorPoint      = Vector2.new(0, 0.5)
-    diRTtitle.Position         = UDim2.new(0, ISLE_H+8, 0.5, -10)
+    diRTtitle.AnchorPoint      = Vector2.new(0, 0)
+    diRTtitle.Position         = UDim2.new(0, ISLE_H+8, 0, ISLE_H/2-10)
     diRTtitle.Size             = UDim2.new(0.38, -ISLE_H, 0, 12)
     diRTtitle.TextTransparency = 1; diRTtitle.ZIndex = 32
 
     -- Runtime value
     local diRTval = mkLabel(diFrame, "00m 00s", Enum.Font.GothamBold, 15,
         Color3.fromRGB(220,242,255), Enum.TextXAlignment.Left)
-    diRTval.AnchorPoint      = Vector2.new(0, 0.5)
-    diRTval.Position         = UDim2.new(0, ISLE_H+8, 0.5, 5)
+    diRTval.AnchorPoint      = Vector2.new(0, 0)
+    diRTval.Position         = UDim2.new(0, ISLE_H+8, 0, ISLE_H/2+5)
     diRTval.Size             = UDim2.new(0.38, -ISLE_H, 0, 20)
     diRTval.TextTransparency = 1; diRTval.ZIndex = 32
 
     -- Divider
     local diDiv = Instance.new("Frame")
-    diDiv.AnchorPoint            = Vector2.new(0.5, 0.5)
-    diDiv.Position               = UDim2.new(0.58, 0, 0.5, 0)
+    diDiv.AnchorPoint            = Vector2.new(0.5, 0)
+    diDiv.Position               = UDim2.new(0.58, 0, 0, ISLE_H/2-15)
     diDiv.Size                   = UDim2.fromOffset(1, 30)
     diDiv.BackgroundColor3       = LINE
     diDiv.BackgroundTransparency = 1
@@ -686,18 +824,153 @@ if CONFIG.ShowPanel then
     -- FPS title
     local diFPStitle = mkLabel(diFrame, "LIVE FPS", Enum.Font.GothamBold, 8,
         Color3.fromRGB(90,155,210), Enum.TextXAlignment.Right)
-    diFPStitle.AnchorPoint      = Vector2.new(1, 0.5)
-    diFPStitle.Position         = UDim2.new(1, -12, 0.5, -10)
+    diFPStitle.AnchorPoint      = Vector2.new(1, 0)
+    diFPStitle.Position         = UDim2.new(1, -12, 0, ISLE_H/2-10)
     diFPStitle.Size             = UDim2.fromOffset(95, 12)
     diFPStitle.TextTransparency = 1; diFPStitle.ZIndex = 32
 
     -- FPS value (color tweens red→green)
     local diFPSval = mkLabel(diFrame, "60", Enum.Font.GothamBold, 18,
         GREEN, Enum.TextXAlignment.Right)
-    diFPSval.AnchorPoint      = Vector2.new(1, 0.5)
-    diFPSval.Position         = UDim2.new(1, -12, 0.5, 5)
+    diFPSval.AnchorPoint      = Vector2.new(1, 0)
+    diFPSval.Position         = UDim2.new(1, -12, 0, ISLE_H/2+5)
     diFPSval.Size             = UDim2.fromOffset(95, 22)
     diFPSval.TextTransparency = 1; diFPSval.ZIndex = 32
+
+    -- ================================================================
+    -- EXPAND SECTION  (revealed when the island is tapped)
+    -- ================================================================
+    local diExpandSection = Instance.new("Frame")
+    diExpandSection.Name                = "ExpandSection"
+    diExpandSection.BackgroundTransparency = 1
+    diExpandSection.Position            = UDim2.new(0, 0, 0, ISLE_H)
+    diExpandSection.Size                = UDim2.new(1, 0, 0, EXPANDED_H - ISLE_H)
+    diExpandSection.Visible             = false
+    diExpandSection.ZIndex              = 33
+    diExpandSection.Parent              = diFrame
+
+    local diExpandScale = Instance.new("UIScale")
+    diExpandScale.Scale = 0
+    diExpandScale.Parent = diExpandSection
+
+    local expandPad = Instance.new("UIPadding")
+    expandPad.PaddingLeft  = UDim.new(0, 18)
+    expandPad.PaddingRight = UDim.new(0, 18)
+    expandPad.PaddingTop   = UDim.new(0, 8)
+    expandPad.Parent       = diExpandSection
+
+    local diDivider2 = Instance.new("Frame")
+    diDivider2.Size                   = UDim2.new(1, -36, 0, 1)
+    diDivider2.Position               = UDim2.fromOffset(0, 0)
+    diDivider2.BackgroundColor3       = LINE
+    diDivider2.BackgroundTransparency = 0.35
+    diDivider2.BorderSizePixel        = 0
+    diDivider2.ZIndex                 = 33
+    diDivider2.Parent                 = diExpandSection
+
+    local fpsBoostLabel = mkLabel(diExpandSection, "FPS BOOST", Enum.Font.GothamBold, 12, WHITE, Enum.TextXAlignment.Left)
+    fpsBoostLabel.Position = UDim2.fromOffset(0, 14)
+    fpsBoostLabel.Size     = UDim2.new(0.6, 0, 0, 18)
+    fpsBoostLabel.ZIndex   = 33
+
+    local fpsBoostSub = mkLabel(diExpandSection, "smoother gameplay, lower graphics", Enum.Font.Gotham, 8, MUTED, Enum.TextXAlignment.Left)
+    fpsBoostSub.Position = UDim2.fromOffset(0, 32)
+    fpsBoostSub.Size     = UDim2.new(0.62, 0, 0, 22)
+    fpsBoostSub.ZIndex   = 33
+
+    -- iPhone-style switch
+    local switchBtn = Instance.new("TextButton")
+    switchBtn.Text            = ""
+    switchBtn.AutoButtonColor = false
+    switchBtn.AnchorPoint     = Vector2.new(1, 0)
+    switchBtn.Position        = UDim2.new(1, 0, 0, 12)
+    switchBtn.Size            = UDim2.fromOffset(50, 28)
+    switchBtn.BackgroundColor3 = SWITCH_OFF
+    switchBtn.BorderSizePixel  = 0
+    switchBtn.ZIndex           = 34
+    switchBtn.Parent           = diExpandSection
+    mkCorner(switchBtn, 14)
+
+    local switchKnob = Instance.new("Frame")
+    switchKnob.Size            = UDim2.fromOffset(22, 22)
+    switchKnob.Position        = UDim2.fromOffset(3, 3)
+    switchKnob.BackgroundColor3 = WHITE
+    switchKnob.BorderSizePixel  = 0
+    switchKnob.ZIndex           = 35
+    switchKnob.Parent           = switchBtn
+    mkCorner(switchKnob, 11)
+
+    local creditLabel = mkLabel(diExpandSection, "Made by Merciful❤️",
+        Enum.Font.GothamMedium, 8, MUTED, Enum.TextXAlignment.Center)
+    creditLabel.AnchorPoint = Vector2.new(0.5, 1)
+    creditLabel.Position    = UDim2.new(0.5, 0, 1, -4)
+    creditLabel.Size        = UDim2.new(1, -36, 0, 14)
+    creditLabel.ZIndex      = 33
+
+    -- Full-island tap catcher: anything NOT covered by an active button (like
+    -- switchBtn) falls through Frames/Labels down to this, so tapping empty
+    -- space toggles expand/collapse while the switch keeps its own tap.
+    local clickCatcher = Instance.new("TextButton")
+    clickCatcher.Text                = ""
+    clickCatcher.AutoButtonColor      = false
+    clickCatcher.BackgroundTransparency = 1
+    clickCatcher.Size                = UDim2.new(1, 0, 1, 0)
+    clickCatcher.ZIndex              = 20
+    clickCatcher.Parent              = diFrame
+
+    local islandExpanded, expandAnimating, introDone = false, false, false
+
+    local function setSwitchVisual(on)
+        local col = on and GREEN or SWITCH_OFF
+        TweenService:Create(switchBtn, TweenInfo.new(0.2), { BackgroundColor3 = col }):Play()
+        TweenService:Create(switchKnob, TweenInfo.new(0.2, Enum.EasingStyle.Quad),
+            { Position = on and UDim2.fromOffset(25, 3) or UDim2.fromOffset(3, 3) }):Play()
+    end
+
+    local function setIslandExpanded(v)
+        if expandAnimating or islandExpanded == v then return end
+        expandAnimating = true
+        islandExpanded  = v
+        if v then
+            diExpandSection.Visible = true
+            diExpandScale.Scale     = 0
+            TweenService:Create(diFrame, TweenInfo.new(0.42, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+                { Size = UDim2.fromOffset(ISLE_W, EXPANDED_H) }):Play()
+            TweenService:Create(diCorner, TweenInfo.new(0.42, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+                { CornerRadius = UDim.new(0, 34) }):Play()
+            task.delay(0.14, function()
+                if diExpandSection.Parent then
+                    TweenService:Create(diExpandScale, TweenInfo.new(0.30, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+                        { Scale = 1 }):Play()
+                end
+            end)
+            task.delay(0.46, function() expandAnimating = false end)
+        else
+            TweenService:Create(diExpandScale, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                { Scale = 0 }):Play()
+            local tw = TweenService:Create(diFrame, TweenInfo.new(0.36, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
+                { Size = UDim2.fromOffset(ISLE_W, ISLE_H) })
+            TweenService:Create(diCorner, TweenInfo.new(0.36, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
+                { CornerRadius = UDim.new(0, ISLE_H/2) }):Play()
+            tw:Play()
+            tw.Completed:Connect(function()
+                if not islandExpanded then diExpandSection.Visible = false end
+                expandAnimating = false
+            end)
+        end
+    end
+
+    clickCatcher.Activated:Connect(function()
+        if not introDone then return end
+        setIslandExpanded(not islandExpanded)
+    end)
+
+    switchBtn.Activated:Connect(function()
+        setBoost(not boostOn)
+    end)
+
+    onFpsBoostChanged = function(on) setSwitchVisual(on) end
+    setSwitchVisual(boostOn)
 
     -- === Animation sequence ===
     task.spawn(function()
@@ -728,6 +1001,7 @@ if CONFIG.ShowPanel then
         TweenService:Create(diDiv,      fi, { BackgroundTransparency = 0.3 }):Play()
 
         task.wait(0.5)
+        introDone = true   -- only allow tap-to-expand once the intro has settled
 
         -- Phase 4: continuous border pulse
         while alive() and gui.Parent do
@@ -1060,4 +1334,4 @@ task.spawn(function()
     end
 end)
 
-print(("[BF Webhook] running — posting every %ds. Re-execute to restart, X on the panel to stop."):format(CONFIG.SendEvery))
+print(("[BF Webhook] running — posting every %ds. FPS Boost is OFF by default; tap the Dynamic Island to toggle it. Re-execute to restart, X on the panel to stop."):format(CONFIG.SendEvery))

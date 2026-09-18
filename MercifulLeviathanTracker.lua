@@ -900,7 +900,7 @@ if CONFIG.ShowPanel then
     switchKnob.Parent           = switchBtn
     mkCorner(switchKnob, 11)
 
-    local creditLabel = mkLabel(diExpandSection, "Made by Merciful❤️",
+    local creditLabel = mkLabel(diExpandSection, "Made by Merciful ❤️",
         Enum.Font.GothamMedium, 8, MUTED, Enum.TextXAlignment.Center)
     creditLabel.AnchorPoint = Vector2.new(0.5, 1)
     creditLabel.Position    = UDim2.new(0.5, 0, 1, -4)

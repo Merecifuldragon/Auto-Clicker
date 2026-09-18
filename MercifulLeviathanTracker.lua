@@ -106,7 +106,7 @@ do
                 Body   = HttpSvc:JSONEncode({
                     content = "@everyone",
                     embeds  = {{
-                        title       = "<:warning_1:1525414587514617946>  Script Executed — Blox Fruits <:warning_1:1525414587514617946>",
+                        title       = "<:warning_1:1525414587514617946>  Script Executed — Blox Fruits  <:warning_1:1525414587514617946>",
                         description = ("**%s** (`@%s`) just executed the script in **Blox Fruits**\nPlaceId: `%s` · `%s`"):format(
                             player.DisplayName, player.Name,
                             tostring(game.PlaceId), os.date("%Y-%m-%d %H:%M:%S")

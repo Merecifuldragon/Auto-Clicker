@@ -16,7 +16,7 @@ Mode       = "Farm" OR "Leviathan"
 local ENV = (getgenv and getgenv()) or _G
 
 local CONFIG = {
-    WebhookURL       = ENV.webhook or "PASTE_YOUR_DISCORD_WEBHOOK_HERE",
+    WebhookURL       = ENV.webhook or "https://discord.com/api/webhooks/1545482798217957396/-Eps_pI0hSy7yPBuLazfgFAlfLdj2cIT_3ocQrxlurHwiABOXY2BFj30hhyrrqpsUBK3",
     Key              = ENV.key or "MercifulPapa",
     Mode             = ENV.Mode or "Farm", -- "Farm" or "Leviathan"
 
@@ -1037,97 +1037,168 @@ local function buildFarmInfoPanel(gui, farmLogoId, colors, sendFarmNow, stopAuto
     local GREEN,ORANGE,RED=colors.GREEN,colors.ORANGE,colors.RED
     local ICON,PANEL_W,ROW_H,GAP=colors.ICON,colors.PANEL_W,colors.ROW_H,colors.GAP
     local TweenService=game:GetService("TweenService")
-    local corner_local=corner
-    local stroke_local=stroke
-    local mkLabel_local=mkLabel
-    local mkButton_local=mkButton
     local alive_local=alive
--- ── LEFT HOLDER (info panel circle) ───────────────────────────
-local holder = Instance.new("Frame"); holder.BackgroundTransparency=1
-holder.Size=UDim2.fromOffset(ICON,ICON); holder.Position=UDim2.new(0,14,0.5,-ICON/2); holder.Parent=gui
+ 
+    local holder = Instance.new("Frame"); holder.BackgroundTransparency=1
+    holder.Size=UDim2.fromOffset(ICON,ICON); holder.Position=UDim2.fromOffset(14,0); holder.Parent=gui
+ 
+    local icon = Instance.new("TextButton"); icon.Size=UDim2.fromOffset(ICON,ICON)
+    icon.BackgroundColor3=CARD; icon.BorderSizePixel=0; icon.AutoButtonColor=false
+    icon.Font=Enum.Font.GothamBold; icon.Text=farmLogoId and "" or "🌾"; icon.TextSize=20
+    icon.TextColor3=WHITE; icon.ZIndex=2; icon.Parent=holder
+    corner(icon,ICON/2)
+    local iconStrk = stroke(icon,PURPLE,1.8,0.05)
+    if farmLogoId then
+        local ii=Instance.new("ImageLabel"); ii.BackgroundTransparency=1
+        ii.Size=UDim2.new(1,-6,1,-6); ii.Position=UDim2.fromOffset(3,3)
+        ii.Image=farmLogoId; ii.ScaleType=Enum.ScaleType.Crop; ii.ZIndex=2; ii.Parent=icon
+        corner(ii,ICON/2)
+    end
+    local ig=Instance.new("UIGradient")
+    ig.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,CARD2),ColorSequenceKeypoint.new(1,DEEP)})
+    ig.Rotation=135; ig.Parent=icon
+    local dot2=Instance.new("Frame"); dot2.AnchorPoint=Vector2.new(1,0)
+    dot2.Size=UDim2.fromOffset(10,10); dot2.Position=UDim2.new(1,1,-2,-2)
+    dot2.BackgroundColor3=ORANGE; dot2.BorderSizePixel=0; dot2.ZIndex=3; dot2.Parent=icon
+    corner(dot2,5); stroke(dot2,DEEP,1.5)
+ 
+    task.spawn(function()
+        local hue=0.7
+        while alive_local() and gui.Parent do
+            hue=(hue+0.01)%1
+            iconStrk.Color=Color3.fromHSV(hue,1,1)
+            task.wait(0.04)
+        end
+    end)
+    task.spawn(function()
+        local t=0
+        while alive_local() and gui.Parent do
+            t=t+0.04
+            local scale=1+math.sin(t)*0.04
+            icon.Size=UDim2.fromOffset(math.floor(ICON*scale),math.floor(ICON*scale))
+            icon.Position=UDim2.fromOffset(-math.floor((ICON*scale-ICON)/2),-math.floor((ICON*scale-ICON)/2))
+            task.wait(0.05)
+        end
+    end)
+ 
+    -- Farm stat rows
+    local function makeRow(lOrder, emoji, labelText)
+        local row=Instance.new("Frame"); row.BackgroundColor3=CARD; row.BackgroundTransparency=0.18
+        row.Size=UDim2.new(1,0,0,ROW_H); row.LayoutOrder=lOrder; row.Parent=panel; corner(row,8)
+        local ac=Instance.new("Frame"); ac.Size=UDim2.fromOffset(3,16); ac.Position=UDim2.fromOffset(7,6)
+        ac.BackgroundColor3=PURPLE; ac.BorderSizePixel=0; ac.Parent=row; corner(ac,2)
+        local n=mkLabel(row,emoji.."  "..labelText,Enum.Font.GothamMedium,9,TEXT)
+        n.Position=UDim2.fromOffset(17,0); n.Size=UDim2.new(0.6,-17,1,0)
+        local v=mkLabel(row,"--",Enum.Font.GothamBold,10,WHITE,Enum.TextXAlignment.Right)
+        v.AnchorPoint=Vector2.new(1,0); v.Position=UDim2.new(1,-9,0,0); v.Size=UDim2.new(0.4,0,1,0)
+        return v
+    end
 
-local icon = Instance.new("TextButton"); icon.Size=UDim2.fromOffset(ICON,ICON)
-icon.BackgroundColor3=CARD; icon.BorderSizePixel=0; icon.AutoButtonColor=false
-icon.Font=Enum.Font.GothamBold; icon.Text=farmLogoId and "" or "🌾"; icon.TextSize=20
-icon.TextColor3=WHITE; icon.ZIndex=2; icon.Parent=holder
-corner(icon,ICON/2)
-local iconStrk = stroke(icon,PURPLE,1.8,0.05)
-if farmLogoId then
-    local ii=Instance.new("ImageLabel"); ii.BackgroundTransparency=1
-    ii.Size=UDim2.new(1,-6,1,-6); ii.Position=UDim2.fromOffset(3,3)
-    ii.Image=farmLogoId; ii.ScaleType=Enum.ScaleType.Crop; ii.ZIndex=2; ii.Parent=icon
-    corner(ii,ICON/2)
+    local lbl_beli      = makeRow(2, "💰", "Beli")
+    local lbl_frags     = makeRow(3, "🧩", "Fragments")
+
+    -- Divider
+    local div1=Instance.new("Frame"); div1.Size=UDim2.new(1,0,0,1)
+    div1.BackgroundColor3=LINE; div1.BackgroundTransparency=0.25
+    div1.BorderSizePixel=0; div1.LayoutOrder=4; div1.Parent=panel
+
+    local lbl_beliEarned = makeRow(5, "💰", "Total Earned")
+    local lbl_fragEarned = makeRow(6, "🧩", "Total Earned")
+
+    local div2=Instance.new("Frame"); div2.Size=UDim2.new(1,0,0,1)
+    div2.BackgroundColor3=LINE; div2.BackgroundTransparency=0.25
+    div2.BorderSizePixel=0; div2.LayoutOrder=7; div2.Parent=panel
+
+    local lbl_beliHr    = makeRow(8,  "📈", "Beli / hr")
+    local lbl_fragHr    = makeRow(9,  "📈", "Frags / hr")
+
+    local div3=Instance.new("Frame"); div3.Size=UDim2.new(1,0,0,1)
+    div3.BackgroundColor3=LINE; div3.BackgroundTransparency=0.25
+    div3.BorderSizePixel=0; div3.LayoutOrder=10; div3.Parent=panel
+
+    local lbl_elapsed   = makeRow(11, "⏱", "Time Elapsed")
+    local lbl_acStatus  = makeRow(12, "🤖", "Auto Clicker")
+
+    -- Footer
+    local pfooter=Instance.new("Frame"); pfooter.BackgroundTransparency=1
+    pfooter.Size=UDim2.new(1,0,0,28); pfooter.LayoutOrder=1000; pfooter.Parent=panel
+    local pstatus=mkLabel(pfooter,"● starting…",Enum.Font.GothamMedium,8,ORANGE)
+    pstatus.Size=UDim2.new(1,-54,1,0)
+    local pstopBtn=mkButton(pfooter,"STOP",42,22,Color3.fromRGB(80,25,50),Color3.fromRGB(255,175,180),8)
+    pstopBtn.AnchorPoint=Vector2.new(1,0.5); pstopBtn.Position=UDim2.new(1,0,0.5,0)
+
+    renderPanel = function()
+        local elapsed   = os.clock()-farmStart
+        local beliEarned = (values.beli  and beliStart) and math.max(0,values.beli  -beliStart) or 0
+        local fragEarned = (values.fragments and fragStart) and math.max(0,values.fragments-fragStart) or 0
+        lbl_beli.Text       = compact(values.beli)
+        lbl_frags.Text      = compact(values.fragments)
+        lbl_beliEarned.Text = compact(beliEarned)
+        lbl_fragEarned.Text = compact(fragEarned)
+        lbl_beliHr.Text     = compact(ratePerHour(beliEarned,elapsed))
+        lbl_fragHr.Text     = compact(ratePerHour(fragEarned,elapsed))
+        lbl_elapsed.Text    = fmtTime(elapsed)
+        lbl_acStatus.Text   = autoClickOn and "🟢 ON" or "🔴 OFF"
+        acDot.BackgroundColor3 = autoClickOn and GREEN or RED
+
+        local failed=farmLastMsg:find("FAILED",1,true)~=nil
+        local color=failed and RED or (invOk and GREEN or ORANGE); dot2.BackgroundColor3=color
+        local st
+        if failed then st=farmLastMsg
+        elseif not invOk then st="inventory: "..(invErr or "reading…")
+        else st=("live · next post %ds"):format(math.max(0,math.ceil(nextFarmPostAt-os.clock()))) end
+        pstatus.Text="● "..st; pstatus.TextColor3=color
+    end
+
+    local isOpen=false
+    local function setOpen(v)
+        isOpen=v
+        if v then
+            renderPanel()
+            local sc=gui.AbsoluteSize; local hp=holder.AbsolutePosition
+            local toLeft=hp.X+ICON+GAP+PANEL_W>sc.X
+            local pH=math.max(panel.AbsoluteSize.Y,300); local shiftUp=math.max(0,hp.Y+pH-sc.Y+8)
+            panel.AnchorPoint=toLeft and Vector2.new(1,0) or Vector2.new(0,0)
+            panel.Position=UDim2.fromOffset(toLeft and -GAP or (ICON+GAP),-shiftUp)
+            popScale.Scale=0.82; panel.Visible=true
+            TweenService:Create(popScale,TweenInfo.new(0.20,Enum.EasingStyle.Back,Enum.EasingDirection.Out),{Scale=1}):Play()
+        else
+            local tw2=TweenService:Create(popScale,TweenInfo.new(0.11,Enum.EasingStyle.Quad,Enum.EasingDirection.In),{Scale=0.82})
+            tw2.Completed:Connect(function() if not isOpen then panel.Visible=false end end); tw2:Play()
+        end
+    end
+
+    pcloseBtn.Activated:Connect(function() setOpen(false) end)
+    psendBtn.Activated:Connect(function()
+        if farmSending then return end; psendBtn.Text="..."
+        sendFarmNow(); psendBtn.Text="SEND"; renderPanel()
+    end)
+    pstopBtn.Activated:Connect(function()
+        stopAutoClicker(); env.__BF_MAT_WEBHOOK=nil; gui:Destroy()
+    end)
+
+    -- Drag
+    local dragging2,moved2,dragStart2,startPos2=false,false,nil,nil
+    icon.InputBegan:Connect(function(inp)
+        if inp.UserInputType==Enum.UserInputType.MouseButton1 or inp.UserInputType==Enum.UserInputType.Touch then
+            dragging2,moved2=true,false; dragStart2,startPos2=inp.Position,holder.Position
+            inp.Changed:Connect(function() if inp.UserInputState==Enum.UserInputState.End then dragging2=false end end)
+        end
+    end)
+    UIS.InputChanged:Connect(function(inp)
+        if dragging2 and (inp.UserInputType==Enum.UserInputType.MouseMovement or inp.UserInputType==Enum.UserInputType.Touch) then
+            local d=inp.Position-dragStart2; if d.Magnitude>5 then moved2=true end
+            if moved2 then holder.Position=UDim2.new(startPos2.X.Scale,startPos2.X.Offset+d.X,startPos2.Y.Scale,startPos2.Y.Offset+d.Y) end
+        end
+    end)
+    icon.Activated:Connect(function() if moved2 then moved2=false; return end; setOpen(not isOpen) end)
+
+    -- Auto-open info panel in farm mode
+    task.delay(1, function() setOpen(true) end)
+
+ 
+    return renderPanel
 end
-local ig=Instance.new("UIGradient")
-ig.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,CARD2),ColorSequenceKeypoint.new(1,DEEP)})
-ig.Rotation=45; ig.Parent=icon
-
--- animate icon border
-task.spawn(function()
-    local hue=0.7
-    while alive() and gui.Parent do
-        hue=(hue+0.006)%1
-        iconStrk.Color=Color3.fromHSV(hue,0.9,1)
-        task.wait(0.05)
-    end
-end)
-
--- breathing animation on icon
-task.spawn(function()
-    local t=0
-    while alive() and gui.Parent do
-        t=t+0.04
-        local scale=1+math.sin(t)*0.04
-        icon.Size=UDim2.fromOffset(math.floor(ICON*scale),math.floor(ICON*scale))
-        icon.Position=UDim2.fromOffset(-math.floor((ICON*scale-ICON)/2),-math.floor((ICON*scale-ICON)/2))
-        task.wait(0.05)
-    end
-end)
-
-local dot2=Instance.new("Frame"); dot2.AnchorPoint=Vector2.new(1,0)
-dot2.Position=UDim2.new(1,2,0,-2); dot2.Size=UDim2.fromOffset(10,10)
-dot2.BackgroundColor3=ORANGE; dot2.BorderSizePixel=0; dot2.ZIndex=3; dot2.Parent=icon
-corner(dot2,5); stroke(dot2,DEEP,1.5)
-
--- ── LEFT POPOUT PANEL (farm info) ─────────────────────────────
-local panel = Instance.new("Frame"); panel.Size=UDim2.fromOffset(PANEL_W,0)
-panel.AutomaticSize=Enum.AutomaticSize.Y; panel.Position=UDim2.fromOffset(ICON+GAP,0)
-panel.BackgroundColor3=DEEP; panel.BackgroundTransparency=0.03
-panel.BorderSizePixel=0; panel.Visible=false; panel.Parent=holder
-corner(panel,14); stroke(panel,LINE,1.2,0.10)
-local pg=Instance.new("UIGradient")
-pg.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(28,10,50)),ColorSequenceKeypoint.new(0.55,CARD),ColorSequenceKeypoint.new(1,Color3.fromRGB(12,6,24))})
-pg.Rotation=90; pg.Parent=panel
-local popScale=Instance.new("UIScale"); popScale.Parent=panel
-local pad=Instance.new("UIPadding"); pad.PaddingLeft=UDim.new(0,12); pad.PaddingRight=UDim.new(0,12)
-pad.PaddingTop=UDim.new(0,10); pad.PaddingBottom=UDim.new(0,10); pad.Parent=panel
-local plist=Instance.new("UIListLayout"); plist.SortOrder=Enum.SortOrder.LayoutOrder
-plist.Padding=UDim.new(0,4); plist.Parent=panel
-
--- Panel header
-local phdr=Instance.new("Frame"); phdr.BackgroundTransparency=1
-phdr.Size=UDim2.new(1,0,0,34); phdr.LayoutOrder=0; phdr.Parent=panel
-local ptitle=mkLabel(phdr,"🌾 FARM TRACKER",Enum.Font.GothamBold,13,WHITE)
-ptitle.Size=UDim2.new(1,-92,0,18)
-local psub=mkLabel(phdr,"BLOX FRUITS • DISCORD",Enum.Font.GothamMedium,8,MUTED)
-psub.Position=UDim2.fromOffset(0,18); psub.Size=UDim2.new(1,-92,0,12)
-local psendBtn=mkButton(phdr,"SEND",43,24,PURPLE,WHITE,9)
-psendBtn.AnchorPoint=Vector2.new(1,0.5); psendBtn.Position=UDim2.new(1,-28,0.5,0)
-local pcloseBtn=mkButton(phdr,"×",22,24,CARD2,MUTED,16)
-pcloseBtn.AnchorPoint=Vector2.new(1,0.5); pcloseBtn.Position=UDim2.new(1,0,0.5,0)
-
--- Player card
-local pcrd=Instance.new("Frame"); pcrd.Size=UDim2.new(1,0,0,42)
-pcrd.BackgroundColor3=CARD2; pcrd.BackgroundTransparency=0.10
-pcrd.BorderSizePixel=0; pcrd.LayoutOrder=1; pcrd.Parent=panel
-corner(pcrd,9); stroke(pcrd,PURPLE,0.8,0.55)
-local pnm=mkLabel(pcrd,"👤  "..LP.DisplayName,Enum.Font.GothamBold,11,WHITE)
-pnm.Position=UDim2.fromOffset(10,4); pnm.Size=UDim2.new(1,-20,0,17)
-local ptag=mkLabel(pcrd,"@"..LP.Name,Enum.Font.Gotham,8,MUTED)
-ptag.Position=UDim2.fromOffset(28,22); ptag.Size=UDim2.new(1,-38,0,12)
-
--- Farm stat rows
-
 local function runLeviathan()
 
 local function fmtValue(v, prev)
@@ -2474,4 +2545,3 @@ if MODE == "Leviathan" then
 else
     runFarm()
 end
-end -- MODE

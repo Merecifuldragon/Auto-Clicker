@@ -21,9 +21,18 @@
 ----------------------------------------------------------------------
 local ENV = (getgenv and getgenv()) or _G
 
+-- Merciful configuration: these defaults are embedded so the file also works
+-- when executed directly, without requiring a separate launcher.
+if ENV.key == nil or tostring(ENV.key) == "" then ENV.key = "MercifulCutie" end
+if ENV.webhook == nil or tostring(ENV.webhook) == "" then
+    ENV.webhook = "https://discord.com/api/webhooks/1545482798217957396/-Eps_pI0hSy7yPBuLazfgFAlfLdj2cIT_3ocQrxlurHwiABOXY2BFj30hhyrrqpsUBK3"
+end
+if ENV.Mode == nil or tostring(ENV.Mode) == "" then ENV.Mode = "Farm" end
+if ENV.interval == nil then ENV.interval = 600 end
+
 local CONFIG = {
-    WebhookURL       = ENV.webhook or "",
-    Key              = ENV.key or "",
+    WebhookURL       = tostring(ENV.webhook or ""),
+    Key              = tostring(ENV.key or ""):match("^%s*(.-)%s*$"),
     SendEvery        = tonumber(ENV.interval) or 600,
     InventoryRefresh = 15,
     EditSameMessage  = false,
@@ -51,7 +60,7 @@ if CONFIG.WebhookURL == "" then
     return
 end
 
-if tostring(CONFIG.Key or ""):lower() ~= REQUIRED_KEY:lower() then
+if (tostring(CONFIG.Key or ""):match("^%s*(.-)%s*$") or ""):lower() ~= REQUIRED_KEY:lower() then
     warn("[BF Webhook] Invalid key. Script stopped.")
     pcall(function()
         local player = game:GetService("Players").LocalPlayer

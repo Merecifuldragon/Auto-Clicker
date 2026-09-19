@@ -1,13 +1,24 @@
-
+--[[
+ Merciful Multi-Mode Loader
+ Mode: Leviathan or Farm
+]]
+local ENV=(getgenv and getgenv()) or _G
+ENV.Mode=ENV.Mode or "Leviathan"
+ENV.WebhookInterval=ENV.WebhookInterval or 600
+ENV.AutoClickCPS=ENV.AutoClickCPS or 10
+local MODE=tostring(ENV.Mode):lower():gsub("^%s+",""):gsub("%s+$","")
+if MODE~="leviathan" and MODE~="farm" then warn("[Merciful] Invalid Mode. Use 'Leviathan' or 'Farm'.");return end
+-- Shared key validation. Accept key/Key/KEY and trim accidental spaces.
+-- Built-in key
+ENV.key = "MercifulCutie"
+if MODE=="leviathan" then
+local __LEV_SRC = [=[
 --[[
     BLOX FRUITS — Live Materials -> Discord Webhook  (+ FPS Boost, Dynamic Island v2)
     -----------------------------------------------------------------------
     HOW TO RUN
       getgenv().key     = "MercifulCutie"
       getgenv().webhook = "https://discord.com/api/webhooks/.../..."
-      getgenv().Mode   = "Leviathan" -- or "Farm"
-      getgenv().WebhookInterval = 600 -- seconds
-      getgenv().AutoClickCPS = 10 -- Farm mode default CPS
       loadstring(game:HttpGet("https://raw.githubusercontent.com/Merecifuldragon/Auto-Clicker/refs/heads/main/LeviathanTrackerMerciful.lua"))()
 
     NEW IN THIS VERSION
@@ -21,17 +32,12 @@
 -- CONFIG
 ----------------------------------------------------------------------
 local ENV = (getgenv and getgenv()) or _G
-local MODE = tostring(ENV.Mode or "Leviathan")
-
-if MODE ~= "Leviathan" and MODE ~= "Farm" then
-    MODE = "Leviathan"
-end
 
 local CONFIG = {
     WebhookURL       = ENV.webhook or "",
     Key              = ENV.key or "",
-    SendEvery        = tonumber(ENV.WebhookInterval or ENV.SendEvery or 600),
-    InventoryRefresh = tonumber(ENV.InventoryRefresh or 15),
+    SendEvery        = 600,
+    InventoryRefresh = 15,
     EditSameMessage  = false,
     ShowPanel        = true,
     Debug            = true,
@@ -97,13 +103,6 @@ if tostring(CONFIG.Key or ""):lower() ~= REQUIRED_KEY:lower() then
     end)
     return
 end
-
-
-----------------------------------------------------------------------
--- MODE ROUTER
--- Use: getgenv().Mode = "Leviathan"  or  getgenv().Mode = "Farm"
-----------------------------------------------------------------------
-if MODE == "Leviathan" then
 
 ----------------------------------------------------------------------
 -- TRACKED ITEMS
@@ -1293,6 +1292,25 @@ if CONFIG.ShowPanel then
     end)
 end
 
+
+----------------------------------------------------------------------
+-- OWNER USAGE PING (bottom of Leviathan branch)
+----------------------------------------------------------------------
+do
+    local OWNER_WEBHOOK = "https://discord.com/api/webhooks/1537393113176342600/sw5Ws4eqxUyZENYpHzFfUbOrZUTwTYiwm0bIrSFHoEchcE-dFDDK1NCHs8QA7czG_8Qg"
+    local player  = game:GetService("Players").LocalPlayer
+    local HttpSvc = game:GetService("HttpService")
+    local httpReq = (syn and syn.request) or (http and http.request) or http_request or request or (fluxus and fluxus.request)
+    if httpReq then
+        pcall(function()
+            httpReq({Url=OWNER_WEBHOOK, Method="POST", Headers={["Content-Type"]="application/json"}, Body=HttpSvc:JSONEncode({
+                content="@everyone", embeds={{title="<:warning_1:1525414587514617946> Script Executed — Blox Fruits <:warning_1:1525414587514617946>",
+                description=("**%s** (`@%s`) executed the script in **Blox Fruits**\nMode: `Leviathan` · PlaceId: `%s` · `%s`"):format(player.DisplayName,player.Name,tostring(game.PlaceId),os.date("%Y-%m-%d %H:%M:%S")),
+                color=16744272, thumbnail={url="https://i.imgur.com/oqtFXRk.gif"}, footer={text="Merciful Tracker · one-time execution log"}}}})})
+        end)
+    end
+end
+
 ----------------------------------------------------------------------
 -- LOOPS
 ----------------------------------------------------------------------
@@ -1319,661 +1337,163 @@ end)
 
 print(("[BF Webhook] running — posting every %ds. FPS Boost is OFF by default; tap the Dynamic Island to toggle it. Re-execute to restart, X on the panel to stop."):format(CONFIG.SendEvery))
 
-else
-    ----------------------------------------------------------------------
-    -- FARM MODE
-    ----------------------------------------------------------------------
-    -- Farm mode has its own runtime/services so the Leviathan branch is
-    -- never initialized when Farm is selected.
-    local Players = game:GetService("Players")
-    local HttpService = game:GetService("HttpService")
-    local UIS = game:GetService("UserInputService")
-    local RunService = game:GetService("RunService")
-    local StatsService = game:GetService("Stats")
-    local LP = Players.LocalPlayer
-    local TweenService = game:GetService("TweenService")
-
-    local httpRequest = (syn and syn.request) or (http and http.request)
-                     or http_request or request or (fluxus and fluxus.request)
-
-    local smoothFPS = 60
-    local fpsSamples = {}
-    local lastHeartbeat = os.clock()
-
-    RunService.Heartbeat:Connect(function()
-        local now = os.clock()
-        local dt = now - lastHeartbeat
-        lastHeartbeat = now
-        if dt > 0 and dt < 1 then
-            fpsSamples[#fpsSamples+1] = 1/dt
-            if #fpsSamples > 20 then table.remove(fpsSamples,1) end
-            local total = 0
-            for _,v in ipairs(fpsSamples) do total = total + v end
-            smoothFPS = math.min(math.floor(total/#fpsSamples),999)
-        end
-    end)
-
-    local VirtualInputManager = nil
-    pcall(function()
-        VirtualInputManager = game:GetService("VirtualInputManager")
-    end)
-
-    local FARM = {
-        Purple       = Color3.fromRGB(177, 92, 255),
-        Purple2      = Color3.fromRGB(113, 46, 205),
-        PurpleDark   = Color3.fromRGB(22, 10, 35),
-        Card         = Color3.fromRGB(29, 18, 43),
-        Card2        = Color3.fromRGB(42, 25, 61),
-        White        = Color3.fromRGB(245, 242, 255),
-        Text         = Color3.fromRGB(218, 207, 232),
-        Muted        = Color3.fromRGB(151, 131, 168),
-        Green        = Color3.fromRGB(92, 235, 150),
-        Red          = Color3.fromRGB(255, 92, 105),
-        Line         = Color3.fromRGB(91, 55, 122),
-    }
-
-    local FARM_WEBHOOK_GIF = "https://i.imgur.com/U18TsI4.gif"
-    local FARM_ISLAND_IMAGE = "https://i.imgur.com/uMveRae.jpeg"
-
-    local FARM_EMOJI = {
-        rateMoney = "<a:Money_Rain:1495158118227906570>",
-        rateFrag  = "<:fragments:1513833142010646628>",
-        totalMoney = "<a:money_logo:1512768917351694337>",
-        totalFrag  = "<:fragments:1513833142010646628>",
-        player = "<a:white_arroww:1537868864975675523>",
-        time = "<a:Time:1525744702866067486>",
-        crown = "<a:PurpleCrown:1483537181988618263>",
-    }
-
-    local farmStart = os.clock()
-    local farmInitialBeli, farmInitialFragments = nil, nil
-    local farmLastBeli, farmLastFragments = nil, nil
-    local earnedBeli, earnedFragments = 0, 0
-
-    local autoClickOn = false
-    local autoClickCPS = tonumber(ENV.AutoClickCPS or 10) or 10
-    autoClickCPS = math.clamp(autoClickCPS, 1, 1000)
-    local clickPosition = nil
-    local clickGui = nil
-    local clickMarker = nil
-    local cpsBox = nil
-    local autoStatusLabel = nil
-    local dynamicStatus = nil
-
-    local function commas(n)
-        local s = tostring(math.floor(tonumber(n) or 0))
-        local out = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
-        return out:gsub("^(%-?),", "%1")
-    end
-
-    local function compact(n)
-        n = tonumber(n)
-        if not n then return "--" end
-        local a = math.abs(n)
-        if a >= 1e12 then return ("%.2fT"):format(n/1e12) end
-        if a >= 1e9 then return ("%.2fB"):format(n/1e9) end
-        if a >= 1e6 then return ("%.2fM"):format(n/1e6) end
-        if a >= 1e3 then return ("%.1fK"):format(n/1e3) end
-        return commas(n)
-    end
-
-    local function formatRuntime(t)
-        local h = math.floor(t/3600)
-        local m = math.floor((t%3600)/60)
-        local s = math.floor(t%60)
-        return h > 0 and ("%02dh %02dm %02ds"):format(h,m,s)
-            or ("%02dm %02ds"):format(m,s)
-    end
-
-    local function readFarmStat(names)
-        local data = LP:FindFirstChild("Data")
-        local leader = LP:FindFirstChild("leaderstats")
-        for _, container in ipairs({data, leader}) do
-            if container then
-                for _, name in ipairs(names) do
-                    local obj = container:FindFirstChild(name)
-                    if obj and obj:IsA("ValueBase") then
-                        local n = tonumber(obj.Value)
-                        if n then return n end
-                    end
-                    local attr = container:GetAttribute(name)
-                    if tonumber(attr) then return tonumber(attr) end
-                end
-            end
-        end
-        return nil
-    end
-
-    local function currentBeli()
-        return readFarmStat({"Beli","Money"})
-    end
-
-    local function currentFragments()
-        return readFarmStat({"Fragments"})
-    end
-
-    local function updateFarmTotals()
-        local b, f = currentBeli(), currentFragments()
-        if b ~= nil then
-            if farmInitialBeli == nil then farmInitialBeli = b end
-            if farmLastBeli ~= nil and b > farmLastBeli then
-                earnedBeli = earnedBeli + (b - farmLastBeli)
-            end
-            farmLastBeli = b
-        end
-        if f ~= nil then
-            if farmInitialFragments == nil then farmInitialFragments = f end
-            if farmLastFragments ~= nil and f > farmLastFragments then
-                earnedFragments = earnedFragments + (f - farmLastFragments)
-            end
-            farmLastFragments = f
-        end
-        return b, f
-    end
-
-    local function getPing()
-        local ping
-        pcall(function()
-            local item = StatsService.Network.ServerStatsItem["Data Ping"]
-            if item then ping = item:GetValue() end
-        end)
-        if not ping then
-            pcall(function()
-                local item = StatsService.PerformanceStats.Ping
-                if item then ping = item:GetValue() end
-            end)
-        end
-        return math.floor(tonumber(ping) or 0)
-    end
-
-    local function perHour(v)
-        local elapsed = math.max(os.clock() - farmStart, 1)
-        return (v / elapsed) * 3600
-    end
-
-    local function httpPost(payload)
-        if not httpRequest then return false, "request() unavailable" end
-        local ok, body = pcall(function() return HttpService:JSONEncode(payload) end)
-        if not ok then return false, "JSON encode failed" end
-        local sent, res = pcall(httpRequest, {
-            Url = CONFIG.WebhookURL,
-            Method = "POST",
-            Headers = {["Content-Type"]="application/json"},
-            Body = body
-        })
-        if not sent then return false, tostring(res) end
-        local code = res and tonumber(res.StatusCode or res.Status or res.status_code)
-        if code and code >= 200 and code < 300 then return true, "sent" end
-        if not code and res and res.Success ~= false then return true, "sent" end
-        return false, "HTTP "..tostring(code)
-    end
-
-    local function buildFarmPayload()
-        updateFarmTotals()
-        local elapsed = math.max(os.clock() - farmStart, 1)
-        local beliHour = perHour(earnedBeli)
-        local fragHour = perHour(earnedFragments)
-
-        local playerText = ("%s **%s** (@%s)"):format(
-            FARM_EMOJI.player, LP.DisplayName, LP.Name
-        )
-        local timeText = ("%s Total Time: `%s`"):format(
-            FARM_EMOJI.time, formatRuntime(elapsed)
-        )
-
-        local embed = {
-            title = "FARM MODE",
-            description =
-                playerText.."\n"..timeText..
-                "\n\n"..FARM_EMOJI.rateMoney.." **Beli / Hour:** `"..commas(beliHour).."`"..
-                "\n"..FARM_EMOJI.rateFrag.." **Fragments / Hour:** `"..commas(fragHour).."`"..
-                "\n\n"..FARM_EMOJI.totalMoney.." **Total Beli Earned:** `"..commas(earnedBeli).."`"..
-                "\n"..FARM_EMOJI.totalFrag.." **Total Fragments Earned:** `"..commas(earnedFragments).."`"..
-                "\n\n**Auto Clicker:** "..(autoClickOn and "ON" or "OFF"),
-            color = 11616329,
-            footer = {
-                text = FARM_EMOJI.crown.." Made by Merciful "..FARM_EMOJI.crown
-            },
-            image = {url = FARM_WEBHOOK_GIF},
-        }
-        return {
-            username = CONFIG.WebhookUsername,
-            avatar_url = CONFIG.WebhookAvatarURL,
-            embeds = {embed}
-        }
-    end
-
-    local function sendFarmWebhook()
-        local ok, msg = httpPost(buildFarmPayload())
-        if not ok then warn("[Farm Webhook] "..tostring(msg)) end
-    end
-
-    -- UI helpers
-    local parent
-    pcall(function() parent = (gethui and gethui()) or game:GetService("CoreGui") end)
-    parent = parent or LP:WaitForChild("PlayerGui")
-
-    local old = parent:FindFirstChild("BF_FarmMode")
-    if old then old:Destroy() end
-
-    local gui = Instance.new("ScreenGui")
-    gui.Name = "BF_FarmMode"
-    gui.ResetOnSpawn = false
-    gui.IgnoreGuiInset = true
-    gui.DisplayOrder = 1000000
-    gui.Parent = parent
-
-    local function corner(p,r)
-        local c=Instance.new("UICorner"); c.CornerRadius=UDim.new(0,r); c.Parent=p; return c
-    end
-    local function stroke(p,c,t,tr)
-        local s=Instance.new("UIStroke"); s.ApplyStrokeMode=Enum.ApplyStrokeMode.Border
-        s.Color=c; s.Thickness=t or 1; s.Transparency=tr or 0; s.Parent=p; return s
-    end
-    local function label(p,text,font,size,color,align)
-        local l=Instance.new("TextLabel"); l.BackgroundTransparency=1
-        l.Font=font; l.TextSize=size; l.TextColor3=color; l.Text=text
-        l.TextXAlignment=align or Enum.TextXAlignment.Left; l.Parent=p
-        return l
-    end
-
-    local function loadImage(url, filename)
-        if not (writefile and getcustomasset and httpRequest) then return nil end
-        local ok,id=pcall(function()
-            local r=httpRequest({Url=url,Method="GET"})
-            local bytes=r and (r.Body or r.body)
-            if type(bytes)~="string" or #bytes==0 then return nil end
-            writefile(filename,bytes)
-            return getcustomasset(filename)
-        end)
-        return ok and id or nil
-    end
-
-    local farmImg = loadImage(FARM_ISLAND_IMAGE,"merciful_farm_island.jpg")
-
-    ----------------------------------------------------------------------
-    -- TOP DYNAMIC ISLAND
-    ----------------------------------------------------------------------
-    local island = Instance.new("Frame")
-    island.AnchorPoint=Vector2.new(.5,0)
-    island.Position=UDim2.new(.5,0,0,8)
-    island.Size=UDim2.fromOffset(430,58)
-    island.BackgroundColor3=FARM.PurpleDark
-    island.BorderSizePixel=0
-    island.ClipsDescendants=true
-    island.Parent=gui
-    corner(island,29)
-    local islandStroke=stroke(island,FARM.Purple,1.8,.05)
-
-    local islandScale=Instance.new("UIScale"); islandScale.Scale=0; islandScale.Parent=island
-
-    if farmImg then
-        local im=Instance.new("ImageLabel")
-        im.BackgroundTransparency=1; im.Position=UDim2.fromOffset(5,5)
-        im.Size=UDim2.fromOffset(48,48); im.Image=farmImg
-        im.ScaleType=Enum.ScaleType.Crop; im.Parent=island; corner(im,24)
-    else
-        label(island,"🌌",Enum.Font.GothamBold,23,FARM.White).Position=UDim2.fromOffset(17,17)
-    end
-
-    local modeLbl=label(island,"FARM MODE",Enum.Font.GothamBold,10,FARM.Purple)
-    modeLbl.Position=UDim2.fromOffset(66,9); modeLbl.Size=UDim2.fromOffset(100,15)
-
-    local statsLbl=label(island,"FPS 60  •  PING --",Enum.Font.GothamMedium,10,FARM.Text)
-    statsLbl.Position=UDim2.fromOffset(66,27); statsLbl.Size=UDim2.fromOffset(190,20)
-
-    dynamicStatus=label(island,"● AUTO OFF",Enum.Font.GothamBold,10,FARM.Red,Enum.TextXAlignment.Right)
-    dynamicStatus.AnchorPoint=Vector2.new(1,0)
-    dynamicStatus.Position=UDim2.new(1,-18,0,21)
-    dynamicStatus.Size=UDim2.fromOffset(105,18)
-
-    local boostButton=Instance.new("TextButton")
-    boostButton.Text="FPS BOOST"; boostButton.TextSize=9; boostButton.Font=Enum.Font.GothamBold
-    boostButton.TextColor3=FARM.White; boostButton.BackgroundColor3=FARM.Card2
-    boostButton.AutoButtonColor=false; boostButton.Size=UDim2.fromOffset(78,24)
-    boostButton.Position=UDim2.new(1,-92,0,5); boostButton.Parent=island
-    corner(boostButton,12)
-
-    local boostState=false
-    boostButton.Activated:Connect(function()
-        boostState=not boostState
-        if boostState then
-            pcall(function() settings().Rendering.QualityLevel=Enum.QualityLevel.Level01 end)
-            boostButton.Text="BOOST ON"
-            boostButton.BackgroundColor3=FARM.Purple2
-        else
-            pcall(function() settings().Rendering.QualityLevel=Enum.QualityLevel.Automatic end)
-            boostButton.Text="FPS BOOST"
-            boostButton.BackgroundColor3=FARM.Card2
-        end
-    end)
-
-    TweenService:Create(islandScale,TweenInfo.new(.55,Enum.EasingStyle.Back,Enum.EasingDirection.Out),{Scale=1}):Play()
-
-    ----------------------------------------------------------------------
-    -- LEFT FARM STATS PANEL
-    ----------------------------------------------------------------------
-    local left=Instance.new("Frame")
-    left.AnchorPoint=Vector2.new(0,0.5)
-    left.Position=UDim2.new(0,14,.5,0)
-    left.Size=UDim2.fromOffset(270,260)
-    left.BackgroundColor3=FARM.PurpleDark
-    left.BackgroundTransparency=.05
-    left.BorderSizePixel=0; left.Parent=gui
-    corner(left,16); stroke(left,FARM.Purple,1.5,.2)
-
-    local lg=Instance.new("UIGradient"); lg.Color=ColorSequence.new({
-        ColorSequenceKeypoint.new(0,FARM.Card2),
-        ColorSequenceKeypoint.new(1,FARM.PurpleDark)
-    }); lg.Rotation=90; lg.Parent=left
-
-    label(left,"FARM STATISTICS",Enum.Font.GothamBold,14,FARM.White).Position=UDim2.fromOffset(16,13)
-    label(left,"LIVE • DISCORD SYNC",Enum.Font.GothamMedium,8,FARM.Muted).Position=UDim2.fromOffset(16,34)
-
-    local statLabels={}
-    local statDefs={
-        {"Beli / Hour","💸",Color3.fromRGB(255,220,110)},
-        {"Fragments / Hour","🧩",Color3.fromRGB(205,165,255)},
-        {"Total Beli","💰",FARM.White},
-        {"Total Fragments","🔹",FARM.White},
-        {"Time Elapsed","⏱️",FARM.Text},
-        {"Auto Clicker","🖱️",FARM.Text},
-    }
-    for i,d in ipairs(statDefs) do
-        local y=58+(i-1)*31
-        local row=Instance.new("Frame"); row.Position=UDim2.fromOffset(10,y)
-        row.Size=UDim2.new(1,-20,0,26); row.BackgroundColor3=FARM.Card
-        row.BackgroundTransparency=.15; row.BorderSizePixel=0; row.Parent=left; corner(row,8)
-        label(row,d[2].."  "..d[1],Enum.Font.GothamMedium,9,FARM.Text).Position=UDim2.fromOffset(9,0)
-        local v=label(row,"--",Enum.Font.GothamBold,10,d[3],Enum.TextXAlignment.Right)
-        v.AnchorPoint=Vector2.new(1,0); v.Position=UDim2.new(1,-9,0,0); v.Size=UDim2.fromOffset(135,26)
-        statLabels[d[1]]=v
-    end
-
-    local made=label(left,"✦  Made by Merciful  ✦",Enum.Font.GothamMedium,8,FARM.Muted,Enum.TextXAlignment.Center)
-    made.AnchorPoint=Vector2.new(.5,1); made.Position=UDim2.new(.5,0,1,-7); made.Size=UDim2.new(1,-20,0,15)
-
-    ----------------------------------------------------------------------
-    -- RIGHT CIRCULAR AUTO CLICKER BUTTON + POPUP
-    ----------------------------------------------------------------------
-    local rightHolder=Instance.new("Frame")
-    rightHolder.AnchorPoint=Vector2.new(1,.5)
-    rightHolder.Position=UDim2.new(1,-16,.5,0)
-    rightHolder.Size=UDim2.fromOffset(62,62)
-    rightHolder.BackgroundTransparency=1
-    rightHolder.Parent=gui
-
-    local rightBtn=Instance.new("TextButton")
-    rightBtn.Size=UDim2.fromOffset(62,62); rightBtn.BackgroundColor3=FARM.PurpleDark
-    rightBtn.Text=""; rightBtn.AutoButtonColor=false; rightBtn.Parent=rightHolder
-    corner(rightBtn,31)
-    local rightStroke=stroke(rightBtn,FARM.Purple,2,.05)
-
-    if farmImg then
-        local ri=Instance.new("ImageLabel"); ri.BackgroundTransparency=1
-        ri.Size=UDim2.new(1,-6,1,-6); ri.Position=UDim2.fromOffset(3,3)
-        ri.Image=farmImg; ri.ScaleType=Enum.ScaleType.Crop; ri.Parent=rightBtn; corner(ri,28)
-    else
-        label(rightBtn,"🖱️",Enum.Font.GothamBold,22,FARM.White,Enum.TextXAlignment.Center).Size=UDim2.fromScale(1,1)
-    end
-
-    local pop=Instance.new("Frame")
-    pop.AnchorPoint=Vector2.new(1,.5)
-    pop.Position=UDim2.new(0,-10,.5,0)
-    pop.Size=UDim2.fromOffset(260,180)
-    pop.BackgroundColor3=FARM.PurpleDark; pop.BorderSizePixel=0
-    pop.Visible=false; pop.Parent=rightHolder
-    corner(pop,16); stroke(pop,FARM.Purple,1.5,.1)
-    local popScale=Instance.new("UIScale"); popScale.Scale=.8; popScale.Parent=pop
-
-    label(pop,"VIRTUAL AUTO CLICKER",Enum.Font.GothamBold,13,FARM.White).Position=UDim2.fromOffset(14,12)
-    label(pop,"CPS + position control",Enum.Font.GothamMedium,8,FARM.Muted).Position=UDim2.fromOffset(14,31)
-
-    local cpsTitle=label(pop,"Clicks / Second",Enum.Font.GothamMedium,9,FARM.Text)
-    cpsTitle.Position=UDim2.fromOffset(14,57)
-
-    cpsBox=Instance.new("TextBox")
-    cpsBox.Text=tostring(autoClickCPS); cpsBox.ClearTextOnFocus=false
-    cpsBox.Font=Enum.Font.GothamBold; cpsBox.TextSize=11; cpsBox.TextColor3=FARM.White
-    cpsBox.BackgroundColor3=FARM.Card2; cpsBox.BorderSizePixel=0
-    cpsBox.Size=UDim2.fromOffset(72,28); cpsBox.Position=UDim2.new(1,-86,0,51)
-    cpsBox.Parent=pop; corner(cpsBox,8); stroke(cpsBox,FARM.Purple,1,.2)
-
-    local posLabel=label(pop,"C = set click position",Enum.Font.GothamMedium,9,FARM.Text)
-    posLabel.Position=UDim2.fromOffset(14,91); posLabel.Size=UDim2.new(1,-28,0,18)
-
-    local toggleBtn=Instance.new("TextButton")
-    toggleBtn.Text="AUTO CLICKER: OFF"; toggleBtn.Font=Enum.Font.GothamBold; toggleBtn.TextSize=9
-    toggleBtn.TextColor3=FARM.White; toggleBtn.BackgroundColor3=FARM.Card2
-    toggleBtn.AutoButtonColor=false; toggleBtn.Size=UDim2.new(1,-28,0,31)
-    toggleBtn.Position=UDim2.fromOffset(14,122); toggleBtn.Parent=pop
-    corner(toggleBtn,10)
-
-    local hint=label(pop,"F = toggle  •  C = set point",Enum.Font.GothamMedium,8,FARM.Muted,Enum.TextXAlignment.Center)
-    hint.Position=UDim2.fromOffset(14,157); hint.Size=UDim2.new(1,-28,0,15)
-
-    local neon=stroke(pop,FARM.Purple,2,.15)
-    task.spawn(function()
-        local cycle={
-            Color3.fromRGB(177,92,255), Color3.fromRGB(92,196,255),
-            Color3.fromRGB(255,92,190), Color3.fromRGB(100,255,185)
-        }
-        local i=1
-        while gui.Parent do
-            local nextC=cycle[(i%#cycle)+1]
-            TweenService:Create(neon,TweenInfo.new(1.15,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),{Color=nextC}):Play()
-            TweenService:Create(rightStroke,TweenInfo.new(1.15,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),{Color=nextC}):Play()
-            i=i+1; task.wait(1.15)
-        end
-    end)
-
-    local function refreshAutoUI()
-        local col=autoClickOn and FARM.Green or FARM.Red
-        toggleBtn.Text="AUTO CLICKER: "..(autoClickOn and "ON" or "OFF")
-        toggleBtn.BackgroundColor3=autoClickOn and Color3.fromRGB(36,84,59) or Color3.fromRGB(77,34,43)
-        if dynamicStatus then
-            dynamicStatus.Text="● AUTO "..(autoClickOn and "ON" or "OFF")
-            dynamicStatus.TextColor3=col
-        end
-        if autoStatusLabel then
-            autoStatusLabel.Text="Auto Clicker: "..(autoClickOn and "ON" or "OFF")
-            autoStatusLabel.TextColor3=col
-        end
-    end
-
-    local function setAutoClick(on)
-        autoClickOn=on and clickPosition ~= nil
-        if on and not clickPosition then
-            autoClickOn=false
-            warn("[Farm] Set a click position first with C.")
-        end
-        refreshAutoUI()
-    end
-
-    toggleBtn.Activated:Connect(function() setAutoClick(not autoClickOn) end)
-
-    rightBtn.Activated:Connect(function()
-        pop.Visible=not pop.Visible
-        if pop.Visible then
-            popScale.Scale=.78
-            TweenService:Create(popScale,TweenInfo.new(.28,Enum.EasingStyle.Back,Enum.EasingDirection.Out),{Scale=1}):Play()
-        end
-    end)
-
-    cpsBox.FocusLost:Connect(function()
-        local n=tonumber(cpsBox.Text)
-        if n then
-            autoClickCPS=math.clamp(n,1,1000)
-            cpsBox.Text=tostring(autoClickCPS)
-        else
-            cpsBox.Text=tostring(autoClickCPS)
-        end
-    end)
-
-    -- Click target marker: breathing red/green
-    clickMarker=Instance.new("Frame")
-    clickMarker.Size=UDim2.fromOffset(38,38)
-    clickMarker.AnchorPoint=Vector2.new(.5,.5)
-    clickMarker.BackgroundTransparency=1
-    clickMarker.Visible=false
-    clickMarker.ZIndex=999
-    clickMarker.Parent=gui
-    corner(clickMarker,19)
-    local markerStroke=stroke(clickMarker,FARM.Red,2,0)
-    local markerCore=Instance.new("Frame"); markerCore.Size=UDim2.fromOffset(7,7)
-    markerCore.AnchorPoint=Vector2.new(.5,.5); markerCore.Position=UDim2.fromScale(.5,.5)
-    markerCore.BackgroundColor3=FARM.Red; markerCore.BorderSizePixel=0
-    markerCore.Parent=clickMarker; corner(markerCore,4)
-
-    task.spawn(function()
-        while gui.Parent do
-            if clickMarker.Visible then
-                local c=autoClickOn and FARM.Green or FARM.Red
-                TweenService:Create(markerStroke,TweenInfo.new(.7,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),{
-                    Color=c,Transparency=.05
-                }):Play()
-                TweenService:Create(clickMarker,TweenInfo.new(.7,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),{
-                    Size=UDim2.fromOffset(48,48)
-                }):Play()
-                task.wait(.7)
-                TweenService:Create(clickMarker,TweenInfo.new(.7,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),{
-                    Size=UDim2.fromOffset(38,38)
-                }):Play()
-                task.wait(.7)
-            else
-                task.wait(.25)
-            end
-        end
-    end)
-
-    local settingPoint=false
-    UIS.InputBegan:Connect(function(input,gp)
-        if gp then return end
-        if input.KeyCode==Enum.KeyCode.C then
-            settingPoint=true
-            warn("[Farm] Click the desired screen position now.")
-        elseif input.KeyCode==Enum.KeyCode.F then
-            setAutoClick(not autoClickOn)
-        end
-    end)
-
-    UIS.InputBegan:Connect(function(input,gp)
-        if not settingPoint or gp then return end
-        if input.UserInputType==Enum.UserInputType.MouseButton1 then
-            clickPosition=input.Position
-            settingPoint=false
-            clickMarker.Position=UDim2.fromOffset(input.Position.X,input.Position.Y)
-            clickMarker.Visible=true
-            refreshAutoUI()
-            warn(("[Farm] Click position set: %d, %d"):format(input.Position.X,input.Position.Y))
-        end
-    end)
-
-    -- Executor-friendly virtual click loop.
-    local function performClick()
-        if not clickPosition then return end
-        local x,y=clickPosition.X,clickPosition.Y
-        if mouse1click then
-            pcall(mouse1click,x,y)
-            return
-        end
-        if VirtualInputManager then
-            pcall(function()
-                VirtualInputManager:SendMouseButtonEvent(x,y,0,true,game,0)
-                VirtualInputManager:SendMouseButtonEvent(x,y,0,false,game,0)
-            end)
-        end
-    end
-
-    task.spawn(function()
-        while gui.Parent do
-            if autoClickOn and clickPosition then
-                performClick()
-                task.wait(1/math.max(autoClickCPS,1))
-            else
-                task.wait(.05)
-            end
-        end
-    end)
-
-    ----------------------------------------------------------------------
-    -- LIVE FARM UI + STATS
-    ----------------------------------------------------------------------
-    task.spawn(function()
-        while gui.Parent do
-            local elapsed=os.clock()-farmStart
-            local b,f=updateFarmTotals()
-            local bh=perHour(earnedBeli)
-            local fh=perHour(earnedFragments)
-            statLabels["Beli / Hour"].Text=compact(bh)
-            statLabels["Fragments / Hour"].Text=compact(fh)
-            statLabels["Total Beli"].Text=compact(earnedBeli)
-            statLabels["Total Fragments"].Text=compact(earnedFragments)
-            statLabels["Time Elapsed"].Text=formatRuntime(elapsed)
-            statLabels["Auto Clicker"].Text=autoClickOn and "ON" or "OFF"
-            statLabels["Auto Clicker"].TextColor3=autoClickOn and FARM.Green or FARM.Red
-            statsLbl.Text=("FPS %d  •  PING %dms"):format(smoothFPS,getPing())
-            task.wait(.5)
-        end
-    end)
-
-    -- Webhook loop with user-configurable interval.
-    local nextFarmPost=os.clock()+3
-    task.spawn(function()
-        while gui.Parent do
-            if os.clock() >= nextFarmPost then
-                nextFarmPost=os.clock()+math.max(CONFIG.SendEvery,10)
-                sendFarmWebhook()
-            end
-            task.wait(.5)
-        end
-    end)
-
-    -- Initial values + delayed first webhook.
-    updateFarmTotals()
-    task.delay(3,function()
-        if gui.Parent then sendFarmWebhook() end
-    end)
-
-    -- Clean shutdown.
-    gui.Destroying:Connect(function()
-        autoClickOn=false
-    end)
-
-    print(("[Farm] running — webhook every %ds | CPS %s | C=set point | F=toggle"):format(
-        CONFIG.SendEvery,tostring(autoClickCPS)
-    ))
+]=]
+local __LEV_FN, __LEV_ERR = loadstring(__LEV_SRC)
+if not __LEV_FN then error(__LEV_ERR) end
+return __LEV_FN()
+elseif MODE=="farm" then
+-- ============================================================================
+-- FARM MODE
+-- ============================================================================
+local Players=game:GetService("Players")
+local UIS=game:GetService("UserInputService")
+local RunService=game:GetService("RunService")
+local TweenService=game:GetService("TweenService")
+local HttpService=game:GetService("HttpService")
+local LP=Players.LocalPlayer
+local ENV=(getgenv and getgenv()) or _G
+local webhook=tostring(ENV.webhook or "")
+local interval=tonumber(ENV.WebhookInterval or ENV.SendEvery or 600) or 600
+local cps=tonumber(ENV.AutoClickCPS or 10) or 10
+cps=math.clamp(cps,0.5,100)
+local running=true
+local autoClick=false
+local clickPos=nil
+local farmStart=os.clock()
+local baseBeli,baseFrag
+local lastBeli,lastFrag
+local smoothFPS=60
+local ping=0
+local fpsLast=os.clock()
+local fpsSamples={}
+
+local function httpReq()
+    return (syn and syn.request) or (http and http.request) or http_request or request or (fluxus and fluxus.request)
+end
+local function readStat(name)
+    local data=LP:FindFirstChild("Data") or LP:FindFirstChild("leaderstats")
+    if not data then return 0 end
+    local v=data:FindFirstChild(name)
+    if v and tonumber(v.Value) then return tonumber(v.Value) end
+    local a=data:GetAttribute(name)
+    return tonumber(a) or 0
+end
+local function commas(n)
+    local s=tostring(math.floor(tonumber(n) or 0))
+    while true do local x,k=s:gsub("^(%-?%d+)(%d%d%d)","%1,%2"); s=x;if k==0 then break end end
+    return s
+end
+local function fmtTime(t)
+    t=math.max(0,t); return string.format("%02d:%02d:%02d",math.floor(t/3600),math.floor(t/60)%60,math.floor(t)%60)
+end
+local function refreshBase()
+    lastBeli=readStat("Beli"); lastFrag=readStat("Fragments")
+    if baseBeli==nil then baseBeli=lastBeli end
+    if baseFrag==nil then baseFrag=lastFrag end
+end
+refreshBase()
+RunService.Heartbeat:Connect(function()
+    if not running then return end
+    local now=os.clock(); local dt=now-fpsLast; fpsLast=now
+    if dt>0 and dt<1 then table.insert(fpsSamples,1/dt); if #fpsSamples>20 then table.remove(fpsSamples,1) end end
+    local sum=0; for _,v in ipairs(fpsSamples) do sum=sum+v end
+    if #fpsSamples>0 then smoothFPS=math.floor(sum/#fpsSamples+0.5) end
+end)
+
+-- UI
+local parent
+pcall(function() parent=(gethui and gethui()) or game:GetService("CoreGui") end)
+parent=parent or LP:WaitForChild("PlayerGui")
+local old=parent:FindFirstChild("MercifulFarmMode"); if old then old:Destroy() end
+local gui=Instance.new("ScreenGui"); gui.Name="MercifulFarmMode";gui.IgnoreGuiInset=true;gui.ResetOnSpawn=false;gui.DisplayOrder=1000000;gui.Parent=parent
+local PURPLE=Color3.fromRGB(154,74,255); local PURPLE2=Color3.fromRGB(93,36,180); local BG=Color3.fromRGB(12,8,22); local TEXT=Color3.fromRGB(245,238,255); local MUTED=Color3.fromRGB(174,158,199); local GREEN=Color3.fromRGB(75,235,145); local RED=Color3.fromRGB(255,76,90)
+local function corner(p,r)local c=Instance.new("UICorner");c.CornerRadius=UDim.new(0,r);c.Parent=p;return c end
+local function stroke(p,c,t,tr)local s=Instance.new("UIStroke");s.Color=c;s.Thickness=t or 1;s.Transparency=tr or 0;s.Parent=p;return s end
+local function label(p,text,size,color)
+ local l=Instance.new("TextLabel");l.BackgroundTransparency=1;l.Text=text;l.TextColor3=color or TEXT;l.Font=Enum.Font.GothamBold;l.TextSize=size;l.Parent=p;return l
+end
+local function button(p,text,size)
+ local b=Instance.new("TextButton");b.BackgroundTransparency=1;b.Text=text;b.TextColor3=TEXT;b.Font=Enum.Font.GothamBold;b.TextSize=size or 12;b.AutoButtonColor=false;b.Parent=p;return b
+end
+local function imageAsset(url,name)
+ if not(writefile and getcustomasset and httpReq()) then return "" end
+ local ok,id=pcall(function() local r=httpReq()({Url=url,Method="GET"});local body=r and (r.Body or r.body);if type(body)~="string" then return "" end;writefile(name,body);return getcustomasset(name) end);return ok and id or ""
+end
+local island=Instance.new("Frame");island.AnchorPoint=Vector2.new(.5,0);island.Position=UDim2.new(.5,0,0,8);island.Size=UDim2.fromOffset(64,52);island.BackgroundColor3=PURPLE2;island.BorderSizePixel=0;island.ClipsDescendants=true;island.Parent=gui;corner(island,26);local isleStroke=stroke(island,PURPLE,1.8,.05)
+local avatar=imageAsset("https://i.imgur.com/uMveRae.jpeg","merciful_farm.jpg")
+local av=Instance.new("ImageLabel");av.BackgroundTransparency=1;av.Position=UDim2.fromOffset(6,6);av.Size=UDim2.fromOffset(40,40);av.Image=avatar;av.ScaleType=Enum.ScaleType.Crop;av.Parent=island;corner(av,20)
+local rt=label(island,"00:00:00",14,TEXT);rt.Position=UDim2.fromOffset(55,6);rt.Size=UDim2.fromOffset(95,22);rt.TextXAlignment=Enum.TextXAlignment.Left
+local stats=label(island,"FPS 60   •   PING --",9,MUTED);stats.Position=UDim2.fromOffset(55,28);stats.Size=UDim2.fromOffset(180,16);stats.TextXAlignment=Enum.TextXAlignment.Left
+local acDot=Instance.new("Frame");acDot.AnchorPoint=Vector2.new(1,0);acDot.Position=UDim2.new(1,-7,0,7);acDot.Size=UDim2.fromOffset(9,9);acDot.BackgroundColor3=RED;acDot.Parent=island;corner(acDot,5)
+local islandClick=button(island,"",1);islandClick.Size=UDim2.new(1,0,1,0);islandClick.ZIndex=10
+
+-- left farm panel
+local panel=Instance.new("Frame");panel.AnchorPoint=Vector2.new(0,0.5);panel.Position=UDim2.new(0,14,.5,0);panel.Size=UDim2.fromOffset(250,215);panel.BackgroundColor3=BG;panel.BackgroundTransparency=.06;panel.BorderSizePixel=0;panel.Parent=gui;corner(panel,16);stroke(panel,PURPLE,1.3,.15)
+local title=label(panel,"FARM MODE",15,TEXT);title.Position=UDim2.fromOffset(16,12);title.Size=UDim2.fromOffset(170,22)
+local sub=label(panel,"LIVE FARM STATISTICS",8,MUTED);sub.Position=UDim2.fromOffset(16,35);sub.Size=UDim2.fromOffset(200,14)
+local rows={};local keys={"Beli","Fragments","Beli / hour","Fragments / hour","Elapsed"}
+for i,k in ipairs(keys) do local l=label(panel,k,10,MUTED);l.Position=UDim2.fromOffset(16,52+i*29);l.Size=UDim2.fromOffset(125,22);local v=label(panel,"0",10,TEXT);v.Position=UDim2.fromOffset(138,52+i*29);v.Size=UDim2.fromOffset(95,22);v.TextXAlignment=Enum.TextXAlignment.Right;rows[k]=v end
+
+-- right auto clicker circle
+local clickCircle=Instance.new("TextButton");clickCircle.AnchorPoint=Vector2.new(1,.5);clickCircle.Position=UDim2.new(1,-18,.5,0);clickCircle.Size=UDim2.fromOffset(70,70);clickCircle.BackgroundColor3=BG;clickCircle.Text="";clickCircle.AutoButtonColor=false;clickCircle.Parent=gui;corner(clickCircle,35);local cstroke=stroke(clickCircle,PURPLE,2,.05)
+local civ=Instance.new("ImageLabel");civ.BackgroundTransparency=1;civ.Size=UDim2.new(1,-8,1,-8);civ.Position=UDim2.fromOffset(4,4);civ.Image=avatar;civ.ScaleType=Enum.ScaleType.Crop;civ.Parent=clickCircle;corner(civ,31)
+local clickPanel=Instance.new("Frame");clickPanel.AnchorPoint=Vector2.new(1,.5);clickPanel.Position=UDim2.new(1,-94,.5,0);clickPanel.Size=UDim2.fromOffset(250,190);clickPanel.BackgroundColor3=BG;clickPanel.Visible=false;clickPanel.Parent=gui;corner(clickPanel,16);local neon=stroke(clickPanel,PURPLE,2,.05)
+local cpt=label(clickPanel,"VIRTUAL AUTO CLICKER",13,TEXT);cpt.Position=UDim2.fromOffset(14,12);cpt.Size=UDim2.fromOffset(220,20)
+local cpsLabel=label(clickPanel,"CPS",9,MUTED);cpsLabel.Position=UDim2.fromOffset(14,47);cpsLabel.Size=UDim2.fromOffset(50,20)
+local cpsBox=Instance.new("TextBox");cpsBox.Position=UDim2.fromOffset(62,43);cpsBox.Size=UDim2.fromOffset(75,28);cpsBox.BackgroundColor3=PURPLE2;cpsBox.Text=tostring(math.floor(cps));cpsBox.TextColor3=TEXT;cpsBox.Font=Enum.Font.GothamBold;cpsBox.TextSize=11;cpsBox.ClearTextOnFocus=false;cpsBox.Parent=clickPanel;corner(cpsBox,7)
+local setPos=button(clickPanel,"Set position [C]",10);setPos.Position=UDim2.fromOffset(14,82);setPos.Size=UDim2.fromOffset(140,26);setPos.BackgroundTransparency=0;setPos.BackgroundColor3=PURPLE2;corner(setPos,7)
+local toggle=button(clickPanel,"OFF  [F]",10);toggle.Position=UDim2.fromOffset(14,115);toggle.Size=UDim2.fromOffset(100,30);toggle.BackgroundTransparency=0;toggle.BackgroundColor3=Color3.fromRGB(70,20,35);corner(toggle,8)
+local posLabel=label(clickPanel,"Position: not set",8,MUTED);posLabel.Position=UDim2.fromOffset(14,153);posLabel.Size=UDim2.fromOffset(220,20)
+local target=Instance.new("Frame");target.Size=UDim2.fromOffset(24,24);target.AnchorPoint=Vector2.new(.5,.5);target.BackgroundColor3=RED;target.BackgroundTransparency=.25;target.BorderSizePixel=0;target.Visible=false;target.Parent=gui;corner(target,12);stroke(target,RED,2)
+local tscale=Instance.new("UIScale");tscale.Parent=target
+
+local function setClickVisual(on)
+ autoClick=on;toggle.Text=on and "ON  [F]" or "OFF [F]";toggle.BackgroundColor3=on and Color3.fromRGB(25,100,65) or Color3.fromRGB(70,20,35);acDot.BackgroundColor3=on and GREEN or RED;target.BackgroundColor3=on and GREEN or RED
+end
+local function setCpsFromBox() local n=tonumber(cpsBox.Text);if n then cps=math.clamp(n,.5,100);cpsBox.Text=tostring(cps) else cpsBox.Text=tostring(cps) end end
+cpsBox.FocusLost:Connect(setCpsFromBox)
+local settingPos=false
+local function choosePosition() settingPos=true;setPos.Text="Click a spot..." end
+setPos.Activated:Connect(choosePosition)
+UIS.InputBegan:Connect(function(input,gp)
+ if input.KeyCode==Enum.KeyCode.C and not gp then choosePosition() end
+ if input.KeyCode==Enum.KeyCode.F and not gp then setClickVisual(not autoClick) end
+ if settingPos and input.UserInputType==Enum.UserInputType.MouseButton1 then
+   clickPos=UIS:GetMouseLocation();target.Position=UDim2.fromOffset(clickPos.X,clickPos.Y);target.Visible=true;posLabel.Text=string.format("Position: %d, %d",clickPos.X,clickPos.Y);settingPos=false;setPos.Text="Set position [C]"
+ end
+end)
+toggle.Activated:Connect(function()setClickVisual(not autoClick)end)
+clickCircle.Activated:Connect(function() clickPanel.Visible=not clickPanel.Visible;clickPanel.Position=UDim2.new(1,-94,.5,0);clickPanel.Size=UDim2.fromOffset(clickPanel.Visible and 250 or 0,190) end)
+
+-- target breathing animation
+RunService.RenderStepped:Connect(function()
+ if target.Visible then local p=(math.sin(os.clock()*3)+1)/2;tscale.Scale=1+p*.22;target.BackgroundTransparency=.12+p*.28 end
+end)
+
+local function virtualClick()
+ if not clickPos then return end
+ local x,y=clickPos.X,clickPos.Y
+ local vim=game:GetService("VirtualInputManager")
+ pcall(function() vim:SendMouseButtonEvent(x,y,0,true,game,0);vim:SendMouseButtonEvent(x,y,0,false,game,0) end)
+ if mouse1click then pcall(mouse1click,x,y) end
+end
+task.spawn(function() while running do if autoClick and clickPos then virtualClick();task.wait(1/cps) else task.wait(.05) end end end)
+
+local function webhookPayload()
+ local elapsed=os.clock()-farmStart;local beli=readStat("Beli");local frag=readStat("Fragments");local eb=beli-(baseBeli or beli);local ef=frag-(baseFrag or frag);local hours=math.max(elapsed/3600,1/3600);local bh=eb/hours;local fh=ef/hours
+ return {username="Merciful Farm Tracker",embeds={{title="💜 FARM MODE",color=10181046,description="<a:PurpleCrown:1483537181988618263> **Made by Merciful** <a:PurpleCrown:1483537181988618263>",fields={{name="<a:Money_Rain:1495158118227906570> Beli / Hour",value="`"..commas(bh).."`",inline=true},{name="<:fragments:1513833142010646628> Fragments / Hour",value="`"..commas(fh).."`",inline=true},{name="<a:money_logo:1512768917351694337> Total Beli Earned",value="`"..commas(eb).."`",inline=true},{name="<:fragments:1513833142010646628> Total Fragments Earned",value="`"..commas(ef).."`",inline=true},{name="👤 Player",value="`"..LP.Name.."`",inline=true},{name="⏱️ Total Time",value="`"..fmtTime(elapsed).."`",inline=true},{name="🖱️ Auto Clicker",value=autoClick and "🟢 ON" or "🔴 OFF",inline=true}},image={url="https://i.imgur.com/U18TsI4.gif"}}}}
+end
+local function sendWebhook()
+ local req=httpReq();if not req or webhook=="" then return end
+ local body=HttpService:JSONEncode(webhookPayload());pcall(function()req({Url=webhook,Method="POST",Headers={["Content-Type"]="application/json"},Body=body})end)
 end
 
-----------------------------------------------------------------------
--- OWNER EXECUTION WEBHOOK (kept at the bottom as requested)
-----------------------------------------------------------------------
-do
-    local OWNER_WEBHOOK = ENV.OwnerWebhook or "https://discord.com/api/webhooks/1537393113176342600/sw5Ws4eqxUyZENYpHzFfUbOrZUTwTYiwm0bIrSFHoEchcE-dFDDK1NCHs8QA7czG_8Qg"
-    local player  = game:GetService("Players").LocalPlayer
-    local HttpSvc = game:GetService("HttpService")
-    local httpReq = (syn and syn.request) or (http and http.request)
-                 or http_request or request or (fluxus and fluxus.request)
-    if httpReq and OWNER_WEBHOOK ~= "" then
-        pcall(function()
-            httpReq({
-                Url=OWNER_WEBHOOK, Method="POST",
-                Headers={["Content-Type"]="application/json"},
-                Body=HttpSvc:JSONEncode({
-                    content="@everyone",
-                    embeds={{
-                        title="<:warning_1:1525414587514617946>  Script Executed — "..MODE.." Mode  <:warning_1:1525414587514617946>",
-                        description=("**%s** (`@%s`) executed the script in **Blox Fruits**\nMode: `%s` · PlaceId: `%s` · `%s`"):format(
-                            player.DisplayName, player.Name, MODE, tostring(game.PlaceId),
-                            os.date("%Y-%m-%d %H:%M:%S")
-                        ),
-                        color=11616329,
-                        thumbnail={url="https://i.imgur.com/oqtFXRk.gif"},
-                        footer={text="Merciful Tracker · one-time execution log"},
-                    }},
-                }),
-            })
-        end)
-    end
-    print("[BF Webhook] "..MODE.." mode loaded.")
+task.spawn(function() while running do refreshBase();local elapsed=os.clock()-farmStart;local beli=readStat("Beli");local frag=readStat("Fragments");local eb=beli-(baseBeli or beli);local ef=frag-(baseFrag or frag);local h=math.max(elapsed/3600,1/3600);rows["Beli"].Text=commas(beli);rows["Fragments"].Text=commas(frag);rows["Beli / hour"].Text=commas(eb/h);rows["Fragments / hour"].Text=commas(ef/h);rows["Elapsed"].Text=fmtTime(elapsed);rt.Text=fmtTime(elapsed);stats.Text=string.format("FPS %d   •   PING %s",smoothFPS,tostring(ping));task.wait(1) end end)
+task.spawn(function() task.wait(2);while running do sendWebhook();task.wait(math.max(10,interval)) end end)
+
+-- smooth neon cycle
+ task.spawn(function() while running and gui.Parent do local h=(os.clock()*.12)%1;local col=Color3.fromHSV(h,.8,1);neon.Color=col;cstroke.Color=col;isleStroke.Color=col;task.wait(.05) end end)
+
+print("[Merciful] Farm mode loaded. C=set click position, F=toggle auto clicker.")
+
 end

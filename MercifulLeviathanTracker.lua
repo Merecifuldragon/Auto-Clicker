@@ -34,7 +34,7 @@ local CONFIG = {
 ----------------------------------------------------------------------
 -- KEY CHECK
 ----------------------------------------------------------------------
-local REQUIRED_KEY = "MercifulCutie"
+local REQUIRED_KEY = "MercifulSigma"
 
 if CONFIG.WebhookURL == "" then
     warn("[BF Webhook] No webhook set. Use getgenv().webhook = '...' before loadstring. Stopped.")

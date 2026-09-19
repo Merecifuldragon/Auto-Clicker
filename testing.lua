@@ -1,31 +1,19 @@
 --[[
- Merciful Multi-Mode Loader
- Mode: Leviathan or Farm
-]]
-local ENV=(getgenv and getgenv()) or _G
-ENV.Mode=ENV.Mode or "Leviathan"
-ENV.WebhookInterval=ENV.WebhookInterval or 600
-ENV.AutoClickCPS=ENV.AutoClickCPS or 10
-local MODE=tostring(ENV.Mode):lower():gsub("^%s+",""):gsub("%s+$","")
-if MODE~="leviathan" and MODE~="farm" then warn("[Merciful] Invalid Mode. Use 'Leviathan' or 'Farm'.");return end
--- Shared key validation. Accept key/Key/KEY and trim accidental spaces.
--- Built-in key
-ENV.key = "MercifulCutie"
-if MODE=="leviathan" then
-local __LEV_SRC = [=[
---[[
-    BLOX FRUITS — Live Materials -> Discord Webhook  (+ FPS Boost, Dynamic Island v2)
+    BLOX FRUITS — Live Materials -> Discord Webhook  (Leviathan + Farm modes)
     -----------------------------------------------------------------------
     HOW TO RUN
-      getgenv().key     = "MercifulCutie"
-      getgenv().webhook = "https://discord.com/api/webhooks/.../..."
+      getgenv().key      = "MercifulCutie"
+      getgenv().webhook  = "https://discord.com/api/webhooks/.../..."
+      getgenv().Mode     = "Leviathan"   -- or "Farm"
+      getgenv().interval = 600           -- optional, seconds between webhook posts
       loadstring(game:HttpGet("https://raw.githubusercontent.com/Merecifuldragon/Auto-Clicker/refs/heads/main/LeviathanTrackerMerciful.lua"))()
 
-    NEW IN THIS VERSION
-      - FPS Boost is merged in (OFF by default). Tap the Dynamic Island to
-        expand it, flip the switch to toggle FPS Boost, tap anywhere outside
-        the switch to collapse it back.
-      - The webhook embed now shows whether FPS Boost is ON/OFF.
+    MODES
+      "Leviathan" -> the original 8-item materials tracker (unchanged).
+      "Farm"      -> Beli + Fragments only, purple webhook, Beli/hr &
+                     Fragments/hr, a purple/pinged Dynamic Island, and a
+                     virtual auto-clicker (hotkeys: C = set click spot,
+                     F = toggle clicking).
 --]]
 
 ----------------------------------------------------------------------
@@ -36,7 +24,7 @@ local ENV = (getgenv and getgenv()) or _G
 local CONFIG = {
     WebhookURL       = ENV.webhook or "",
     Key              = ENV.key or "",
-    SendEvery        = 600,
+    SendEvery        = tonumber(ENV.interval) or 600,
     InventoryRefresh = 15,
     EditSameMessage  = false,
     ShowPanel        = true,
@@ -45,6 +33,13 @@ local CONFIG = {
     WebhookAvatarURL = "https://i.imgur.com/WUuVA9l.jpeg",
     WebhookGifURL    = "https://i.imgur.com/4jxdn8Z.gif",
 }
+
+local MODE = tostring(ENV.Mode or "Leviathan"):lower()
+if MODE ~= "leviathan" and MODE ~= "farm" then
+    warn("[BF Webhook] Unknown Mode '"..tostring(ENV.Mode).."', defaulting to Leviathan.")
+    MODE = "leviathan"
+end
+local IS_FARM = (MODE == "farm")
 
 ----------------------------------------------------------------------
 -- KEY CHECK
@@ -92,9 +87,8 @@ if tostring(CONFIG.Key or ""):lower() ~= REQUIRED_KEY:lower() then
         t2.Size = UDim2.new(1,-28,0,18); t2.Font = Enum.Font.GothamMedium
         t2.TextSize = 10; t2.TextColor3 = Color3.fromRGB(255,195,200)
         t2.TextXAlignment = Enum.TextXAlignment.Center
-        t2.Text = "Suck My Dick Nigger"; t2.Parent = frame
+        t2.Text = "Check your key and try again."; t2.Parent = frame
 
-        -- Entrance animation for the error banner
         local TW = game:GetService("TweenService")
         local sc = Instance.new("UIScale"); sc.Scale = 0; sc.Parent = frame
         TW:Create(sc, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale=1}):Play()
@@ -129,6 +123,7 @@ local HttpService = game:GetService("HttpService")
 local UIS         = game:GetService("UserInputService")
 local RunService  = game:GetService("RunService")
 local Lighting    = game:GetService("Lighting")
+local Stats       = game:GetService("Stats")
 local LP          = Players.LocalPlayer
 
 local env = (getgenv and getgenv()) or _G
@@ -148,12 +143,13 @@ local renderPanel = nil
 local setStatus   = function(_) end
 
 ----------------------------------------------------------------------
--- RUNTIME + FPS TRACKING
+-- RUNTIME + FPS + PING TRACKING
 ----------------------------------------------------------------------
 local scriptStartTime = os.clock()
 local smoothFPS       = 60
 local fpsBuffer       = {}
 local _lastHBTime     = os.clock()
+local currentPing     = 0
 
 RunService.Heartbeat:Connect(function()
     if not alive() then return end
@@ -169,6 +165,16 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
+task.spawn(function()
+    while alive() do
+        local ok, p = pcall(function()
+            return math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+        end)
+        if ok then currentPing = p end
+        task.wait(1)
+    end
+end)
+
 local function formatRuntime(t)
     local h = math.floor(t / 3600)
     local m = math.floor((t % 3600) / 60)
@@ -176,7 +182,6 @@ local function formatRuntime(t)
     return h > 0 and ("%02dh %02dm %02ds"):format(h,m,s) or ("%02dm %02ds"):format(m,s)
 end
 
--- FPS → text color (red → orange → green)
 local function fpsTextColor(fps)
     local t = math.clamp(fps / 60, 0, 1)
     if t < 0.5 then
@@ -188,26 +193,28 @@ local function fpsTextColor(fps)
     end
 end
 
--- FPS → island background + border (dark-red → dark-blue)
-local function islandFpsColors(fps)
-    local t  = math.clamp(fps / 60, 0, 1)
-    local bg = Color3.fromRGB(20,4,6):Lerp(Color3.fromRGB(9,20,30), t)
-    local br = Color3.fromRGB(245,96,103):Lerp(Color3.fromRGB(92,196,255), t)
-    return bg, br
+-- FPS -> island background + border. Leviathan: dark-red -> dark-blue.
+-- Farm: stays in the purple family (dark-magenta warning -> violet good).
+local function islandReactiveColors(fps)
+    local t = math.clamp(fps / 60, 0, 1)
+    if IS_FARM then
+        local bg = Color3.fromRGB(28,6,34):Lerp(Color3.fromRGB(18,8,32), t)
+        local br = Color3.fromRGB(255,90,190):Lerp(Color3.fromRGB(178,111,255), t)
+        return bg, br
+    else
+        local bg = Color3.fromRGB(20,4,6):Lerp(Color3.fromRGB(9,20,30), t)
+        local br = Color3.fromRGB(245,96,103):Lerp(Color3.fromRGB(92,196,255), t)
+        return bg, br
+    end
 end
 
 ----------------------------------------------------------------------
--- FPS BOOSTER  (merged from the standalone booster script — OFF by default)
+-- FPS BOOSTER — OFF by default, works in both modes
 ----------------------------------------------------------------------
-local FPS_CFG = {
-    UnlockFPS  = false,
-    FlatColor  = true,
-    ClearSky   = true,
-}
-
-local boostOn         = false   -- stays OFF until the user flips the switch
-local strippedCount   = 0
-local onFpsBoostChanged = nil   -- wired up by the panel UI further down
+local FPS_CFG = { UnlockFPS=false, FlatColor=true, ClearSky=true }
+local boostOn           = false
+local strippedCount     = 0
+local onFpsBoostChanged = nil
 
 local function stripInstance(obj)
     local did = false
@@ -216,9 +223,7 @@ local function stripInstance(obj)
             obj.Material = Enum.Material.SmoothPlastic
             obj.Reflectance = 0
             obj.CastShadow = false
-            if FPS_CFG.FlatColor then
-                obj.Color = Color3.fromRGB(127, 127, 127)
-            end
+            if FPS_CFG.FlatColor then obj.Color = Color3.fromRGB(127, 127, 127) end
             if obj:IsA("MeshPart") then
                 obj.TextureID = ""
                 obj.RenderFidelity = Enum.RenderFidelity.Performance
@@ -267,10 +272,8 @@ local function stripTerrain()
     local t = workspace:FindFirstChildOfClass("Terrain")
     if t then
         pcall(function()
-            t.WaterWaveSize = 0
-            t.WaterWaveSpeed = 0
-            t.WaterReflectance = 0
-            t.Decoration = false
+            t.WaterWaveSize = 0; t.WaterWaveSpeed = 0
+            t.WaterReflectance = 0; t.Decoration = false
         end)
         local c = t:FindFirstChildOfClass("Clouds")
         if c then pcall(function() c:Destroy() end) end
@@ -289,12 +292,8 @@ local function setLowQuality()
 end
 
 local function applyBoost()
-    setLowQuality()
-    stripLighting()
-    stripTerrain()
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        stripInstance(obj)
-    end
+    setLowQuality(); stripLighting(); stripTerrain()
+    for _, obj in ipairs(workspace:GetDescendants()) do stripInstance(obj) end
 end
 
 local function revertBoost()
@@ -320,6 +319,83 @@ local function setBoost(on)
     if on then applyBoost() else revertBoost() end
     if onFpsBoostChanged then onFpsBoostChanged(on) end
     if renderPanel then renderPanel() end
+end
+
+----------------------------------------------------------------------
+-- VIRTUAL AUTO CLICKER  (Farm mode only)
+----------------------------------------------------------------------
+local autoClickOn        = false
+local clickCPS           = 10
+local clickTargetX       = nil
+local clickTargetY       = nil
+local onAutoClickChanged = nil
+
+local mouseMoveAbs = mousemoveabs
+local mouseClickFn = mouse1click
+    or ((mouse1press and mouse1release) and function()
+            mouse1press(); task.wait(); mouse1release()
+        end)
+    or nil
+
+local function performVirtualClick()
+    if not (clickTargetX and clickTargetY) then return end
+    pcall(function()
+        if mouseMoveAbs then mouseMoveAbs(clickTargetX, clickTargetY) end
+    end)
+    local ok = pcall(function()
+        if mouseClickFn then
+            mouseClickFn()
+        else
+            local VIM = game:GetService("VirtualInputManager")
+            VIM:SendMouseButtonEvent(clickTargetX, clickTargetY, 0, true, game, 1)
+            task.wait()
+            VIM:SendMouseButtonEvent(clickTargetX, clickTargetY, 0, false, game, 1)
+        end
+    end)
+    if not ok and CONFIG.Debug then
+        warn("[Auto Clicker] this executor doesn't expose a click-simulation API")
+    end
+end
+
+local function setAutoClick(on)
+    autoClickOn = on
+    if onAutoClickChanged then onAutoClickChanged(on) end
+    if renderPanel then renderPanel() end
+end
+
+local function setClickCPS(n)
+    clickCPS = math.clamp(math.floor(n), 1, 50)
+    if onAutoClickChanged then onAutoClickChanged(autoClickOn) end
+end
+
+local function setClickTargetFromMouse()
+    local ok, mp = pcall(function() return UIS:GetMouseLocation() end)
+    if ok and mp then
+        clickTargetX, clickTargetY = mp.X, mp.Y
+        if onAutoClickChanged then onAutoClickChanged(autoClickOn) end
+    end
+end
+
+if IS_FARM then
+    UIS.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if input.KeyCode == Enum.KeyCode.C then
+            setClickTargetFromMouse()
+        elseif input.KeyCode == Enum.KeyCode.F then
+            setAutoClick(not autoClickOn)
+        end
+    end)
+
+    task.spawn(function()
+        while alive() do
+            if autoClickOn and clickTargetX then
+                performVirtualClick()
+                task.wait(1 / clickCPS)
+            else
+                task.wait(0.15)
+            end
+        end
+    end)
 end
 
 ----------------------------------------------------------------------
@@ -362,7 +438,36 @@ local function refreshStats()
 end
 
 ----------------------------------------------------------------------
--- INVENTORY
+-- FARM MODE: session baseline so we can compute "earned" and per-hour
+----------------------------------------------------------------------
+local farmBaselineSet = false
+local farmStartBeli, farmStartFrag = 0, 0
+
+local function ensureFarmBaseline()
+    if farmBaselineSet then return end
+    if values.beli ~= nil and values.fragments ~= nil then
+        farmStartBeli, farmStartFrag = values.beli, values.fragments
+        farmBaselineSet = true
+    end
+end
+
+local function farmStats()
+    ensureFarmBaseline()
+    local elapsed = os.clock() - scriptStartTime
+    local hours   = math.max(elapsed / 3600, 1/3600)
+    local beli    = values.beli or 0
+    local frag    = values.fragments or 0
+    local moneyEarned = farmBaselineSet and math.max(beli - farmStartBeli, 0) or 0
+    local fragEarned  = farmBaselineSet and math.max(frag - farmStartFrag, 0) or 0
+    return {
+        elapsed = elapsed, beli = beli, frag = frag,
+        moneyEarned = moneyEarned, fragEarned = fragEarned,
+        moneyPerHr = moneyEarned / hours, fragPerHr = fragEarned / hours,
+    }
+end
+
+----------------------------------------------------------------------
+-- INVENTORY  (Leviathan mode only — Farm mode never needs these calls)
 ----------------------------------------------------------------------
 local Modules = RS:WaitForChild("Modules", 30)
 local Net     = Modules and Modules:WaitForChild("Net", 30)
@@ -373,7 +478,7 @@ for _, it in ipairs(ITEMS) do
     if it.names then
         it.id = it.fallbackId
         ID_TO_KEY[it.id] = it.key
-        if CONFIG.Debug then
+        if CONFIG.Debug and not IS_FARM then
             pcall(function()
                 local ItemId = require(RS.Economy.ItemId)
                 local gameId = tonumber(ItemId.getId(it.names[1], it.idType):unwrap())
@@ -415,21 +520,23 @@ local function totalFor(id)
     return total
 end
 
-local changedEvent = netRemote("RE/OnItemValueChanged")
-if changedEvent then
-    changedEvent.OnClientEvent:Connect(function(batch)
-        if not alive() or type(batch) ~= "table" then return end
-        local list = (batch.Key ~= nil) and { batch } or batch
-        local touched = false
-        for _, rec in pairs(list) do
-            if applyRecord(rec, qty) then
-                local id = tonumber(rec.ItemId)
-                values[ID_TO_KEY[id]] = totalFor(id)
-                touched = true
+if not IS_FARM then
+    local changedEvent = netRemote("RE/OnItemValueChanged")
+    if changedEvent then
+        changedEvent.OnClientEvent:Connect(function(batch)
+            if not alive() or type(batch) ~= "table" then return end
+            local list = (batch.Key ~= nil) and { batch } or batch
+            local touched = false
+            for _, rec in pairs(list) do
+                if applyRecord(rec, qty) then
+                    local id = tonumber(rec.ItemId)
+                    values[ID_TO_KEY[id]] = totalFor(id)
+                    touched = true
+                end
             end
-        end
-        if touched and renderPanel then renderPanel() end
-    end)
+            if touched and renderPanel then renderPanel() end
+        end)
+    end
 end
 
 local function readCraftData()
@@ -521,7 +628,7 @@ local function fmtValue(v, prev)
     return s
 end
 
-local function buildPayload(snap, prev, stale)
+local function buildLeviathanPayload(snap, prev, stale)
     local fields = {}
     local function add(key)
         local it = ITEM[key]
@@ -538,7 +645,6 @@ local function buildPayload(snap, prev, stale)
     add("foolsgold"); add("terror"); spacer()
     add("levheart"); add("levscale"); spacer()
 
-    -- Bold the display name so it stands out in Discord
     local desc = ("<a:white_arroww:1537868864975675523> **%s** (@%s)"):format(LP.DisplayName, LP.Name)
     local data  = LP:FindFirstChild("Data")
     local lvl   = data and data:FindFirstChild("Level")
@@ -566,6 +672,43 @@ local function buildPayload(snap, prev, stale)
     return { username=CONFIG.WebhookUsername, avatar_url=CONFIG.WebhookAvatarURL, embeds={embed} }
 end
 
+local function buildFarmPayload()
+    local st = farmStats()
+
+    local desc = ("<a:white_arroww:1537868864975675523> **%s** (@%s)"):format(LP.DisplayName, LP.Name)
+    desc = desc.."\n<a:Time:1525744702866067486> Runtime: `"..formatRuntime(st.elapsed).."`"
+    desc = desc.."\n"..(boostOn and "<a:Green_dot1:1528055975540691095>" or "<a:wrong:1386220343055876176>")
+        .." FPS Boost: "..(boostOn and "ON" or "OFF")
+    desc = desc.."\n"..(autoClickOn and "<a:Green_dot1:1528055975540691095>" or "<a:wrong:1386220343055876176>")
+        .." Auto Clicker: "..(autoClickOn and "ON" or "OFF")
+
+    local fields = {
+        { name="<a:money:1481836978571055174> Beli",         value="```"..commas(st.beli).."```", inline=true },
+        { name="<:Fragments:1523292585127448576> Fragments", value="```"..commas(st.frag).."```", inline=true },
+        { name="\u{200B}", value="\u{200B}", inline=true },
+        { name="<a:Money_Rain:1495158118227906570> Beli / hr",       value="```"..commas(math.floor(st.moneyPerHr)).."```", inline=true },
+        { name="<:fragments:1513833142010646628> Fragments / hr",    value="```"..commas(math.floor(st.fragPerHr)).."```", inline=true },
+        { name="\u{200B}", value="\u{200B}", inline=true },
+        { name="<a:money_logo:1512768917351694337> Total Beli Earned",       value="```"..commas(st.moneyEarned).."```", inline=true },
+        { name="<:fragments:1513833142010646628> Total Fragments Earned",    value="```"..commas(st.fragEarned).."```", inline=true },
+        { name="\u{200B}", value="\u{200B}", inline=true },
+    }
+
+    local stamp
+    pcall(function() stamp = DateTime.now():ToIsoDate() end)
+
+    local embed = {
+        title       = "<a:PurpleCrown:1483537181988618263> MADE BY MERCIFUL <a:PurpleCrown:1483537181988618263>",
+        description = desc,
+        color       = 9133302, -- purple
+        fields      = fields,
+        image       = { url = "https://i.imgur.com/U18TsI4.gif" },
+        footer      = { text = "Farm Mode • updates every "..CONFIG.SendEvery.."s" },
+        timestamp   = stamp,
+    }
+    return { username=CONFIG.WebhookUsername, avatar_url=CONFIG.WebhookAvatarURL, embeds={embed} }
+end
+
 local messageId
 local function postWebhook(payload)
     local url = CONFIG.WebhookURL
@@ -582,9 +725,6 @@ local function postWebhook(payload)
             method, target = "POST", base..(query=="" and "?wait=true" or (query.."&wait=true"))
         end
         local sent, res = pcall(httpRequest, { Url=target, Method=method,
-            Headers={"Content-Type","application/json"}, Body=body })
-        -- headers as table doesn't work; fix:
-        sent, res = pcall(httpRequest, { Url=target, Method=method,
             Headers={["Content-Type"]="application/json"}, Body=body })
         if not sent then return false, "request error: "..tostring(res) end
         local code = res and tonumber(res.StatusCode or res.Status or res.status_code)
@@ -612,18 +752,27 @@ local function sendNow()
     if sending then return end
     sending = true
     refreshStats()
-    local fresh = readInventory()
-    if renderPanel then renderPanel() end
-    local snap = {}
-    for _, it in ipairs(ITEMS) do snap[it.key] = values[it.key] end
-    local ok, msg = postWebhook(buildPayload(snap, lastSent, not fresh))
-    if ok then
-        lastSent    = snap
-        lastPostMsg = "sent "..os.date("%H:%M:%S")..(fresh and "" or " (stale)")
+
+    if IS_FARM then
+        local ok, msg = postWebhook(buildFarmPayload())
+        lastPostMsg = ok and ("sent "..os.date("%H:%M:%S")) or ("FAILED: "..msg)
+        if not ok then warn("[BF Webhook] "..msg) end
     else
-        lastPostMsg = "FAILED: "..msg
-        warn("[BF Webhook] "..msg)
+        local fresh = readInventory()
+        if renderPanel then renderPanel() end
+        local snap = {}
+        for _, it in ipairs(ITEMS) do snap[it.key] = values[it.key] end
+        local ok, msg = postWebhook(buildLeviathanPayload(snap, lastSent, not fresh))
+        if ok then
+            lastSent    = snap
+            lastPostMsg = "sent "..os.date("%H:%M:%S")..(fresh and "" or " (stale)")
+        else
+            lastPostMsg = "FAILED: "..msg
+            warn("[BF Webhook] "..msg)
+        end
     end
+
+    if renderPanel then renderPanel() end
     lastPostAt = os.clock()
     sending    = false
 end
@@ -651,22 +800,25 @@ if CONFIG.ShowPanel then
     pcall(function() parent = (gethui and gethui()) or game:GetService("CoreGui") end)
     parent = parent or LP:WaitForChild("PlayerGui")
 
-    local old = parent:FindFirstChild("BF_MaterialsWebhook")
-    if old then old:Destroy() end
+    for _, n in ipairs({ "BF_MaterialsWebhook", "BF_AutoClicker" }) do
+        local old = parent:FindFirstChild(n)
+        if old then old:Destroy() end
+    end
 
-    -- Color palette (matches the script design)
-    local WHITE  = Color3.fromRGB(244, 251, 255)
-    local TEXT   = Color3.fromRGB(205, 232, 248)
-    local MUTED  = Color3.fromRGB(130, 174, 201)
-    local BLUE   = Color3.fromRGB(92,  196, 255)
-    local BLUE2  = Color3.fromRGB(56,  157, 224)
-    local DEEP   = Color3.fromRGB(9,   20,  30)
-    local CARD   = Color3.fromRGB(14,  31,  44)
-    local CARD2  = Color3.fromRGB(18,  42,  59)
-    local LINE   = Color3.fromRGB(53,  104, 132)
-    local GREEN  = Color3.fromRGB(92,  221, 148)
-    local ORANGE = Color3.fromRGB(245, 181, 78)
-    local RED    = Color3.fromRGB(245, 96,  103)
+    -- Theme: Leviathan = blue, Farm = purple. Same variable names throughout
+    -- so the rest of the UI code doesn't need separate mode branches.
+    local WHITE   = Color3.fromRGB(244, 251, 255)
+    local TEXT    = Color3.fromRGB(205, 232, 248)
+    local MUTED   = Color3.fromRGB(130, 174, 201)
+    local DEEP    = IS_FARM and Color3.fromRGB(15, 8, 24)   or Color3.fromRGB(9, 20, 30)
+    local CARD    = IS_FARM and Color3.fromRGB(24, 14, 36)  or Color3.fromRGB(14, 31, 44)
+    local CARD2   = IS_FARM and Color3.fromRGB(32, 19, 48)  or Color3.fromRGB(18, 42, 59)
+    local LINE    = IS_FARM and Color3.fromRGB(120, 80, 180) or Color3.fromRGB(53, 104, 132)
+    local ACCENT  = IS_FARM and Color3.fromRGB(178, 111, 255) or Color3.fromRGB(92, 196, 255)
+    local ACCENT2 = IS_FARM and Color3.fromRGB(140, 70, 230)  or Color3.fromRGB(56, 157, 224)
+    local GREEN   = Color3.fromRGB(92,  221, 148)
+    local ORANGE  = Color3.fromRGB(245, 181, 78)
+    local RED     = Color3.fromRGB(245, 96,  103)
     local SWITCH_OFF = Color3.fromRGB(70, 78, 86)
 
     local ICON, PANEL_W, ROW_H, GAP = 64, 250, 28, 7
@@ -721,17 +873,17 @@ if CONFIG.ShowPanel then
     end
 
     local logoAssetId = loadRemoteImage(CONFIG.WebhookAvatarURL, "bf_logo.png")
-    local diImgId     = loadRemoteImage("https://i.imgur.com/ynh1ZW5.jpeg", "bf_di.jpg")
+    local diImgId      = IS_FARM
+        and loadRemoteImage("https://i.imgur.com/uMveRae.jpeg", "bf_farm.jpg")
+        or  loadRemoteImage("https://i.imgur.com/ynh1ZW5.jpeg", "bf_di.jpg")
 
     -- ================================================================
-    -- DYNAMIC ISLAND  (top-center, FPS-reactive color, tap to expand)
+    -- DYNAMIC ISLAND
     -- ================================================================
-    local ISLE_H       = 52
-    local ISLE_W       = 408
-    local EXPANDED_H   = ISLE_H + 92   -- height when the FPS Boost switch is revealed
+    local ISLE_H     = 52
+    local ISLE_W     = IS_FARM and 460 or 408
+    local EXPANDED_H = ISLE_H + 92
 
-    -- The island: starts as 52×52 circle, expands to full pill.
-    -- Anchored to the TOP so it only ever grows downward (matches iOS behavior).
     local diFrame = Instance.new("Frame")
     diFrame.Name             = "DynamicIsland"
     diFrame.AnchorPoint      = Vector2.new(0.5, 0)
@@ -744,22 +896,17 @@ if CONFIG.ShowPanel then
     diFrame.Parent           = gui
     local diCorner = mkCorner(diFrame, ISLE_H/2)
 
-    -- Subtle inner gradient
     local diGrad = Instance.new("UIGradient")
     diGrad.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0,   Color3.fromRGB(19,49,68)),
+        ColorSequenceKeypoint.new(0,   IS_FARM and Color3.fromRGB(45,20,70) or Color3.fromRGB(19,49,68)),
         ColorSequenceKeypoint.new(0.5, CARD),
-        ColorSequenceKeypoint.new(1,   Color3.fromRGB(4,10,18)),
+        ColorSequenceKeypoint.new(1,   IS_FARM and Color3.fromRGB(10,5,20)  or Color3.fromRGB(4,10,18)),
     })
     diGrad.Rotation = 90; diGrad.Parent = diFrame
 
-    -- Border (color will be tweened based on FPS)
-    local diBorder = mkStroke(diFrame, BLUE, 1.5, 0.25)
-
-    -- Pop-in scale (starts at 0)
+    local diBorder = mkStroke(diFrame, ACCENT, 1.5, 0.25)
     local diScale = Instance.new("UIScale"); diScale.Scale = 0; diScale.Parent = diFrame
 
-    -- Profile image (left side)
     local diImg = Instance.new("ImageLabel")
     diImg.BackgroundTransparency = 1
     diImg.AnchorPoint  = Vector2.new(0, 0)
@@ -775,130 +922,106 @@ if CONFIG.ShowPanel then
         fb.AnchorPoint = Vector2.new(0,0); fb.Position = UDim2.new(0,5,0,5)
         fb.Size = UDim2.fromOffset(ISLE_H-10, ISLE_H-10)
         fb.Font = Enum.Font.GothamBold; fb.TextSize = 22; fb.TextColor3 = WHITE
-        fb.Text = "🐉"; fb.ZIndex = 32; fb.Parent = diFrame
+        fb.Text = IS_FARM and "🌾" or "🐉"; fb.ZIndex = 32; fb.Parent = diFrame
     end
 
-    -- Runtime title
-    local diRTtitle = mkLabel(diFrame, "RUNTIME", Enum.Font.GothamBold, 8,
-        Color3.fromRGB(90,155,210), Enum.TextXAlignment.Left)
-    diRTtitle.AnchorPoint      = Vector2.new(0, 0)
-    diRTtitle.Position         = UDim2.new(0, ISLE_H+8, 0, ISLE_H/2-10)
-    diRTtitle.Size             = UDim2.new(0.38, -ISLE_H, 0, 12)
-    diRTtitle.TextTransparency = 1; diRTtitle.ZIndex = 32
+    -- Auto-clicker status dot on the island (Farm mode only)
+    local acDot
+    if IS_FARM then
+        acDot = Instance.new("Frame")
+        acDot.AnchorPoint = Vector2.new(0, 0)
+        acDot.Position = UDim2.new(0, ISLE_H-16, 0, -2)
+        acDot.Size = UDim2.fromOffset(12,12)
+        acDot.BackgroundColor3 = RED
+        acDot.BorderSizePixel = 0
+        acDot.ZIndex = 34
+        acDot.Parent = diFrame
+        mkCorner(acDot, 6); mkStroke(acDot, DEEP, 1.5)
+    end
 
-    -- Runtime value
-    local diRTval = mkLabel(diFrame, "00m 00s", Enum.Font.GothamBold, 15,
-        Color3.fromRGB(220,242,255), Enum.TextXAlignment.Left)
-    diRTval.AnchorPoint      = Vector2.new(0, 0)
-    diRTval.Position         = UDim2.new(0, ISLE_H+8, 0, ISLE_H/2+5)
-    diRTval.Size             = UDim2.new(0.38, -ISLE_H, 0, 20)
-    diRTval.TextTransparency = 1; diRTval.ZIndex = 32
+    local diLabels = {}   -- text elements to fade in during the intro
 
-    -- Divider
-    local diDiv = Instance.new("Frame")
-    diDiv.AnchorPoint            = Vector2.new(0.5, 0)
-    diDiv.Position               = UDim2.new(0.58, 0, 0, ISLE_H/2-15)
-    diDiv.Size                   = UDim2.fromOffset(1, 30)
-    diDiv.BackgroundColor3       = LINE
-    diDiv.BackgroundTransparency = 1
-    diDiv.BorderSizePixel        = 0; diDiv.ZIndex = 32; diDiv.Parent = diFrame
+    local function addStat(x, w, title)
+        local titleLbl = mkLabel(diFrame, title, Enum.Font.GothamBold, 8,
+            Color3.fromRGB(90,155,210), Enum.TextXAlignment.Left)
+        titleLbl.AnchorPoint = Vector2.new(0,0)
+        titleLbl.Position = UDim2.new(0, x, 0, ISLE_H/2-10)
+        titleLbl.Size = UDim2.fromOffset(w, 12)
+        titleLbl.TextTransparency = 1; titleLbl.ZIndex = 32
+        diLabels[#diLabels+1] = titleLbl
 
-    -- FPS title
-    local diFPStitle = mkLabel(diFrame, "LIVE FPS", Enum.Font.GothamBold, 8,
-        Color3.fromRGB(90,155,210), Enum.TextXAlignment.Right)
-    diFPStitle.AnchorPoint      = Vector2.new(1, 0)
-    diFPStitle.Position         = UDim2.new(1, -12, 0, ISLE_H/2-10)
-    diFPStitle.Size             = UDim2.fromOffset(95, 12)
-    diFPStitle.TextTransparency = 1; diFPStitle.ZIndex = 32
+        local valLbl = mkLabel(diFrame, "--", Enum.Font.GothamBold, 15,
+            Color3.fromRGB(220,242,255), Enum.TextXAlignment.Left)
+        valLbl.AnchorPoint = Vector2.new(0,0)
+        valLbl.Position = UDim2.new(0, x, 0, ISLE_H/2+5)
+        valLbl.Size = UDim2.fromOffset(w, 20)
+        valLbl.TextTransparency = 1; valLbl.ZIndex = 32
+        diLabels[#diLabels+1] = valLbl
 
-    -- FPS value (color tweens red→green)
-    local diFPSval = mkLabel(diFrame, "60", Enum.Font.GothamBold, 18,
-        GREEN, Enum.TextXAlignment.Right)
-    diFPSval.AnchorPoint      = Vector2.new(1, 0)
-    diFPSval.Position         = UDim2.new(1, -12, 0, ISLE_H/2+5)
-    diFPSval.Size             = UDim2.fromOffset(95, 22)
-    diFPSval.TextTransparency = 1; diFPSval.ZIndex = 32
+        return valLbl
+    end
+
+    local diRTval, diFPSval, diPingVal
+    if IS_FARM then
+        diRTval   = addStat(ISLE_H+8,   102, "RUNTIME")
+        diPingVal = addStat(ISLE_H+130, 90,  "PING")
+        diFPSval  = addStat(ISLE_H+238, 90,  "LIVE FPS")
+    else
+        diRTval  = addStat(ISLE_H+8, 150, "RUNTIME")
+        diFPSval = addStat(ISLE_H+178, 90, "LIVE FPS")
+    end
 
     -- ================================================================
-    -- EXPAND SECTION  (revealed when the island is tapped)
+    -- EXPAND SECTION (tap island -> reveal FPS Boost switch)
     -- ================================================================
     local diExpandSection = Instance.new("Frame")
-    diExpandSection.Name                = "ExpandSection"
     diExpandSection.BackgroundTransparency = 1
-    diExpandSection.Position            = UDim2.new(0, 0, 0, ISLE_H)
-    diExpandSection.Size                = UDim2.new(1, 0, 0, EXPANDED_H - ISLE_H)
-    diExpandSection.Visible             = false
-    diExpandSection.ZIndex              = 33
-    diExpandSection.Parent              = diFrame
+    diExpandSection.Position = UDim2.new(0, 0, 0, ISLE_H)
+    diExpandSection.Size     = UDim2.new(1, 0, 0, EXPANDED_H - ISLE_H)
+    diExpandSection.Visible  = false
+    diExpandSection.ZIndex   = 33
+    diExpandSection.Parent   = diFrame
 
     local diExpandScale = Instance.new("UIScale")
-    diExpandScale.Scale = 0
-    diExpandScale.Parent = diExpandSection
+    diExpandScale.Scale = 0; diExpandScale.Parent = diExpandSection
 
     local expandPad = Instance.new("UIPadding")
-    expandPad.PaddingLeft  = UDim.new(0, 18)
-    expandPad.PaddingRight = UDim.new(0, 18)
-    expandPad.PaddingTop   = UDim.new(0, 8)
-    expandPad.Parent       = diExpandSection
+    expandPad.PaddingLeft = UDim.new(0,18); expandPad.PaddingRight = UDim.new(0,18)
+    expandPad.PaddingTop  = UDim.new(0,8);  expandPad.Parent = diExpandSection
 
     local diDivider2 = Instance.new("Frame")
-    diDivider2.Size                   = UDim2.new(1, -36, 0, 1)
-    diDivider2.Position               = UDim2.fromOffset(0, 0)
-    diDivider2.BackgroundColor3       = LINE
-    diDivider2.BackgroundTransparency = 0.35
-    diDivider2.BorderSizePixel        = 0
-    diDivider2.ZIndex                 = 33
-    diDivider2.Parent                 = diExpandSection
+    diDivider2.Size = UDim2.new(1,-36,0,1); diDivider2.Position = UDim2.fromOffset(0,0)
+    diDivider2.BackgroundColor3 = LINE; diDivider2.BackgroundTransparency = 0.35
+    diDivider2.BorderSizePixel = 0; diDivider2.ZIndex = 33; diDivider2.Parent = diExpandSection
 
     local fpsBoostLabel = mkLabel(diExpandSection, "FPS BOOST", Enum.Font.GothamBold, 12, WHITE, Enum.TextXAlignment.Left)
-    fpsBoostLabel.Position = UDim2.fromOffset(0, 14)
-    fpsBoostLabel.Size     = UDim2.new(0.6, 0, 0, 18)
-    fpsBoostLabel.ZIndex   = 33
+    fpsBoostLabel.Position = UDim2.fromOffset(0, 14); fpsBoostLabel.Size = UDim2.new(0.6,0,0,18); fpsBoostLabel.ZIndex = 33
 
     local fpsBoostSub = mkLabel(diExpandSection, "smoother gameplay, lower graphics", Enum.Font.Gotham, 8, MUTED, Enum.TextXAlignment.Left)
-    fpsBoostSub.Position = UDim2.fromOffset(0, 32)
-    fpsBoostSub.Size     = UDim2.new(0.62, 0, 0, 22)
-    fpsBoostSub.ZIndex   = 33
+    fpsBoostSub.Position = UDim2.fromOffset(0, 32); fpsBoostSub.Size = UDim2.new(0.62,0,0,22); fpsBoostSub.ZIndex = 33
 
-    -- iPhone-style switch
     local switchBtn = Instance.new("TextButton")
-    switchBtn.Text            = ""
-    switchBtn.AutoButtonColor = false
-    switchBtn.AnchorPoint     = Vector2.new(1, 0)
-    switchBtn.Position        = UDim2.new(1, 0, 0, 12)
-    switchBtn.Size            = UDim2.fromOffset(50, 28)
-    switchBtn.BackgroundColor3 = SWITCH_OFF
-    switchBtn.BorderSizePixel  = 0
-    switchBtn.ZIndex           = 34
-    switchBtn.Parent           = diExpandSection
+    switchBtn.Text = ""; switchBtn.AutoButtonColor = false
+    switchBtn.AnchorPoint = Vector2.new(1,0); switchBtn.Position = UDim2.new(1,0,0,12)
+    switchBtn.Size = UDim2.fromOffset(50,28); switchBtn.BackgroundColor3 = SWITCH_OFF
+    switchBtn.BorderSizePixel = 0; switchBtn.ZIndex = 34; switchBtn.Parent = diExpandSection
     mkCorner(switchBtn, 14)
 
     local switchKnob = Instance.new("Frame")
-    switchKnob.Size            = UDim2.fromOffset(22, 22)
-    switchKnob.Position        = UDim2.fromOffset(3, 3)
-    switchKnob.BackgroundColor3 = WHITE
-    switchKnob.BorderSizePixel  = 0
-    switchKnob.ZIndex           = 35
-    switchKnob.Parent           = switchBtn
+    switchKnob.Size = UDim2.fromOffset(22,22); switchKnob.Position = UDim2.fromOffset(3,3)
+    switchKnob.BackgroundColor3 = WHITE; switchKnob.BorderSizePixel = 0
+    switchKnob.ZIndex = 35; switchKnob.Parent = switchBtn
     mkCorner(switchKnob, 11)
 
-    local creditLabel = mkLabel(diExpandSection, "Made by Merciful ❤️",
+    local creditLabel = mkLabel(diExpandSection, "⚡ Dynamic Island — made by Merciful",
         Enum.Font.GothamMedium, 8, MUTED, Enum.TextXAlignment.Center)
-    creditLabel.AnchorPoint = Vector2.new(0.5, 1)
-    creditLabel.Position    = UDim2.new(0.5, 0, 1, -4)
-    creditLabel.Size        = UDim2.new(1, -36, 0, 14)
-    creditLabel.ZIndex      = 33
+    creditLabel.AnchorPoint = Vector2.new(0.5,1); creditLabel.Position = UDim2.new(0.5,0,1,-4)
+    creditLabel.Size = UDim2.new(1,-36,0,14); creditLabel.ZIndex = 33
 
-    -- Full-island tap catcher: anything NOT covered by an active button (like
-    -- switchBtn) falls through Frames/Labels down to this, so tapping empty
-    -- space toggles expand/collapse while the switch keeps its own tap.
     local clickCatcher = Instance.new("TextButton")
-    clickCatcher.Text                = ""
-    clickCatcher.AutoButtonColor      = false
-    clickCatcher.BackgroundTransparency = 1
-    clickCatcher.Size                = UDim2.new(1, 0, 1, 0)
-    clickCatcher.ZIndex              = 20
-    clickCatcher.Parent              = diFrame
+    clickCatcher.Text = ""; clickCatcher.AutoButtonColor = false
+    clickCatcher.BackgroundTransparency = 1; clickCatcher.Size = UDim2.new(1,0,1,0)
+    clickCatcher.ZIndex = 20; clickCatcher.Parent = diFrame
 
     local islandExpanded, expandAnimating, introDone = false, false, false
 
@@ -906,16 +1029,14 @@ if CONFIG.ShowPanel then
         local col = on and GREEN or SWITCH_OFF
         TweenService:Create(switchBtn, TweenInfo.new(0.2), { BackgroundColor3 = col }):Play()
         TweenService:Create(switchKnob, TweenInfo.new(0.2, Enum.EasingStyle.Quad),
-            { Position = on and UDim2.fromOffset(25, 3) or UDim2.fromOffset(3, 3) }):Play()
+            { Position = on and UDim2.fromOffset(25,3) or UDim2.fromOffset(3,3) }):Play()
     end
 
     local function setIslandExpanded(v)
         if expandAnimating or islandExpanded == v then return end
-        expandAnimating = true
-        islandExpanded  = v
+        expandAnimating = true; islandExpanded = v
         if v then
-            diExpandSection.Visible = true
-            diExpandScale.Scale     = 0
+            diExpandSection.Visible = true; diExpandScale.Scale = 0
             TweenService:Create(diFrame, TweenInfo.new(0.42, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
                 { Size = UDim2.fromOffset(ISLE_W, EXPANDED_H) }):Play()
             TweenService:Create(diCorner, TweenInfo.new(0.42, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
@@ -946,46 +1067,23 @@ if CONFIG.ShowPanel then
         if not introDone then return end
         setIslandExpanded(not islandExpanded)
     end)
-
-    switchBtn.Activated:Connect(function()
-        setBoost(not boostOn)
-    end)
-
+    switchBtn.Activated:Connect(function() setBoost(not boostOn) end)
     onFpsBoostChanged = function(on) setSwitchVisual(on) end
     setSwitchVisual(boostOn)
 
-    -- === Animation sequence ===
     task.spawn(function()
         task.wait(0.18)
-
-        -- Phase 1: circle pops in (springy Back ease)
-        TweenService:Create(diScale,
-            TweenInfo.new(0.42, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-            { Scale = 1 }
-        ):Play()
-
+        TweenService:Create(diScale, TweenInfo.new(0.42, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
         task.wait(0.88)
-
-        -- Phase 2: expand to full pill width
-        TweenService:Create(diFrame,
-            TweenInfo.new(0.55, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-            { Size = UDim2.fromOffset(ISLE_W, ISLE_H) }
-        ):Play()
-
+        TweenService:Create(diFrame, TweenInfo.new(0.55, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+            { Size = UDim2.fromOffset(ISLE_W, ISLE_H) }):Play()
         task.wait(0.48)
-
-        -- Phase 3: fade all text + divider in together
         local fi = TweenInfo.new(0.38, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-        TweenService:Create(diRTtitle,  fi, { TextTransparency = 0        }):Play()
-        TweenService:Create(diRTval,    fi, { TextTransparency = 0        }):Play()
-        TweenService:Create(diFPStitle, fi, { TextTransparency = 0        }):Play()
-        TweenService:Create(diFPSval,   fi, { TextTransparency = 0        }):Play()
-        TweenService:Create(diDiv,      fi, { BackgroundTransparency = 0.3 }):Play()
-
+        for _, lbl in ipairs(diLabels) do
+            TweenService:Create(lbl, fi, { TextTransparency = 0 }):Play()
+        end
         task.wait(0.5)
-        introDone = true   -- only allow tap-to-expand once the intro has settled
-
-        -- Phase 4: continuous border pulse
+        introDone = true
         while alive() and gui.Parent do
             TweenService:Create(diBorder, TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { Transparency = 0.05 }):Play()
             task.wait(1.6)
@@ -994,55 +1092,44 @@ if CONFIG.ShowPanel then
         end
     end)
 
-    -- Live update: runtime, FPS text + full island color shift based on FPS
     task.spawn(function()
         while alive() and gui.Parent do
-            local elapsed = os.clock() - scriptStartTime
-            diRTval.Text  = formatRuntime(elapsed)
+            diRTval.Text  = formatRuntime(os.clock() - scriptStartTime)
             diFPSval.Text = tostring(smoothFPS)
+            if diPingVal then diPingVal.Text = currentPing.."ms" end
 
-            local textCol        = fpsTextColor(smoothFPS)
-            local islandBg, islandBr = islandFpsColors(smoothFPS)
-
-            TweenService:Create(diFPSval, TweenInfo.new(0.35, Enum.EasingStyle.Linear), { TextColor3 = textCol        }):Play()
+            local textCol = fpsTextColor(smoothFPS)
+            local islandBg, islandBr = islandReactiveColors(smoothFPS)
+            TweenService:Create(diFPSval, TweenInfo.new(0.35, Enum.EasingStyle.Linear), { TextColor3 = textCol }):Play()
             TweenService:Create(diFrame,  TweenInfo.new(0.50, Enum.EasingStyle.Linear), { BackgroundColor3 = islandBg }):Play()
-            TweenService:Create(diBorder, TweenInfo.new(0.50, Enum.EasingStyle.Linear), { Color = islandBr            }):Play()
+            TweenService:Create(diBorder, TweenInfo.new(0.50, Enum.EasingStyle.Linear), { Color = islandBr }):Play()
+            if acDot then acDot.BackgroundColor3 = autoClickOn and GREEN or RED end
 
             task.wait(0.2)
         end
     end)
 
     -- ================================================================
-    -- FLOATING ICON (slides in from left after island finishes)
+    -- LEFT FLOATING ICON + POPOUT  (stats panel)
     -- ================================================================
     local holder = Instance.new("Frame")
     holder.BackgroundTransparency = 1
     holder.Size     = UDim2.fromOffset(ICON, ICON)
-    holder.Position = UDim2.new(0, -ICON - 20, 0.5, -ICON/2)  -- starts off-screen
+    holder.Position = UDim2.new(0, -ICON - 20, 0.5, -ICON/2)
     holder.Parent   = gui
 
-    -- Slide icon in after island animation completes
     task.delay(1.8, function()
         if not (alive() and gui.Parent) then return end
-        TweenService:Create(holder,
-            TweenInfo.new(0.50, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-            { Position = UDim2.new(0, 14, 0.5, -ICON/2) }
-        ):Play()
+        TweenService:Create(holder, TweenInfo.new(0.50, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+            { Position = UDim2.new(0, 14, 0.5, -ICON/2) }):Play()
     end)
 
     local icon = Instance.new("TextButton")
-    icon.Size             = UDim2.fromOffset(ICON, ICON)
-    icon.BackgroundColor3 = CARD
-    icon.BorderSizePixel  = 0
-    icon.AutoButtonColor  = false
-    icon.Font             = Enum.Font.GothamBold
-    icon.Text             = logoAssetId and "" or "🌀"
-    icon.TextSize         = 20
-    icon.TextColor3       = WHITE
-    icon.ZIndex           = 2
-    icon.Parent           = holder
-    mkCorner(icon, ICON/2)
-    mkStroke(icon, BLUE, 1.6, 0.05)
+    icon.Size = UDim2.fromOffset(ICON, ICON); icon.BackgroundColor3 = CARD
+    icon.BorderSizePixel = 0; icon.AutoButtonColor = false
+    icon.Font = Enum.Font.GothamBold; icon.Text = logoAssetId and "" or "🌀"
+    icon.TextSize = 20; icon.TextColor3 = WHITE; icon.ZIndex = 2; icon.Parent = holder
+    mkCorner(icon, ICON/2); mkStroke(icon, ACCENT, 1.6, 0.05)
 
     if logoAssetId then
         local ii = Instance.new("ImageLabel"); ii.BackgroundTransparency = 1
@@ -1052,10 +1139,7 @@ if CONFIG.ShowPanel then
     end
 
     local iconGrad = Instance.new("UIGradient")
-    iconGrad.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, CARD2),
-        ColorSequenceKeypoint.new(1, DEEP),
-    })
+    iconGrad.Color = ColorSequence.new({ ColorSequenceKeypoint.new(0, CARD2), ColorSequenceKeypoint.new(1, DEEP) })
     iconGrad.Rotation = 45; iconGrad.Parent = icon
 
     local dot = Instance.new("Frame")
@@ -1064,25 +1148,18 @@ if CONFIG.ShowPanel then
     dot.BorderSizePixel = 0; dot.ZIndex = 3; dot.Parent = icon
     mkCorner(dot, 5); mkStroke(dot, DEEP, 1.5)
 
-    -- ================================================================
-    -- POPOUT PANEL
-    -- ================================================================
     local panel = Instance.new("Frame")
-    panel.Size                   = UDim2.fromOffset(PANEL_W, 0)
-    panel.AutomaticSize          = Enum.AutomaticSize.Y
-    panel.Position               = UDim2.fromOffset(ICON+GAP, 0)
-    panel.BackgroundColor3       = DEEP
-    panel.BackgroundTransparency = 0.03
-    panel.BorderSizePixel        = 0
-    panel.Visible                = false
-    panel.Parent                 = holder
+    panel.Size = UDim2.fromOffset(PANEL_W, 0); panel.AutomaticSize = Enum.AutomaticSize.Y
+    panel.Position = UDim2.fromOffset(ICON+GAP, 0); panel.BackgroundColor3 = DEEP
+    panel.BackgroundTransparency = 0.03; panel.BorderSizePixel = 0
+    panel.Visible = false; panel.Parent = holder
     mkCorner(panel, 14); mkStroke(panel, LINE, 1.2, 0.10)
 
     local panelGrad = Instance.new("UIGradient")
     panelGrad.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0,    Color3.fromRGB(19,49,68)),
+        ColorSequenceKeypoint.new(0, IS_FARM and Color3.fromRGB(45,20,70) or Color3.fromRGB(19,49,68)),
         ColorSequenceKeypoint.new(0.55, CARD),
-        ColorSequenceKeypoint.new(1,    Color3.fromRGB(8,19,28)),
+        ColorSequenceKeypoint.new(1, IS_FARM and Color3.fromRGB(10,5,20) or Color3.fromRGB(8,19,28)),
     })
     panelGrad.Rotation = 90; panelGrad.Parent = panel
 
@@ -1096,29 +1173,27 @@ if CONFIG.ShowPanel then
     local list = Instance.new("UIListLayout")
     list.SortOrder = Enum.SortOrder.LayoutOrder; list.Padding = UDim.new(0,4); list.Parent = panel
 
-    -- Header
     local header = Instance.new("Frame")
     header.BackgroundTransparency = 1; header.Size = UDim2.new(1,0,0,34)
     header.LayoutOrder = 0; header.Parent = panel
 
-    local titleLbl = mkLabel(header, "LIVE TRACKER", Enum.Font.GothamBold, 13, WHITE)
+    local titleLbl = mkLabel(header, IS_FARM and "FARM MODE" or "LIVE TRACKER", Enum.Font.GothamBold, 13, WHITE)
     titleLbl.Size = UDim2.new(1,-92,0,18)
 
     local subtitleLbl = mkLabel(header, "BLOX FRUITS • DISCORD", Enum.Font.GothamMedium, 8, MUTED)
     subtitleLbl.Position = UDim2.fromOffset(0,18); subtitleLbl.Size = UDim2.new(1,-92,0,12)
 
-    local sendBtn  = mkButton(header, "SEND", 43, 24, BLUE2, WHITE, 9)
+    local sendBtn  = mkButton(header, "SEND", 43, 24, ACCENT2, WHITE, 9)
     sendBtn.AnchorPoint = Vector2.new(1,0.5); sendBtn.Position = UDim2.new(1,-28,0.5,0)
 
     local closeBtn = mkButton(header, "×", 22, 24, CARD2, MUTED, 16)
     closeBtn.AnchorPoint = Vector2.new(1,0.5); closeBtn.Position = UDim2.new(1,0,0.5,0)
 
-    -- Player card
     local playerCard = Instance.new("Frame")
     playerCard.Size = UDim2.new(1,0,0,42); playerCard.BackgroundColor3 = CARD2
     playerCard.BackgroundTransparency = 0.10; playerCard.BorderSizePixel = 0
     playerCard.LayoutOrder = 1; playerCard.Parent = panel
-    mkCorner(playerCard, 9); mkStroke(playerCard, BLUE, 0.8, 0.55)
+    mkCorner(playerCard, 9); mkStroke(playerCard, ACCENT, 0.8, 0.55)
 
     local pName = mkLabel(playerCard, "👤  "..LP.DisplayName, Enum.Font.GothamBold, 11, WHITE)
     pName.Position = UDim2.fromOffset(10,4); pName.Size = UDim2.new(1,-20,0,17)
@@ -1126,24 +1201,11 @@ if CONFIG.ShowPanel then
     local pTag = mkLabel(playerCard, "@"..LP.Name, Enum.Font.Gotham, 8, MUTED)
     pTag.Position = UDim2.fromOffset(28,22); pTag.Size = UDim2.new(1,-38,0,12)
 
-    local SHORT = {
-        beli="Beli", fragments="Fragments", mythical="Mythical Scrolls",
-        legendary="Legendary Scrolls", foolsgold="Fool's Gold",
-        terror="Terror Eyes", levheart="Leviathan Heart", levscale="Leviathan Scale",
-    }
-
     local valueLabels = {}
-    local panelRows   = { playerCard }   -- for stagger animation
+    local panelRows   = { playerCard }
     local order = 2
 
-    for _, it in ipairs(ITEMS) do
-        if it.key == "mythical" then
-            local div = Instance.new("Frame")
-            div.Size = UDim2.new(1,0,0,1); div.BackgroundColor3 = LINE
-            div.BackgroundTransparency = 0.25; div.BorderSizePixel = 0
-            div.LayoutOrder = order; div.Parent = panel; order = order + 1
-        end
-
+    local function addRow(uiEmoji, text, valueKey)
         local row = Instance.new("Frame")
         row.BackgroundColor3 = CARD; row.BackgroundTransparency = 0.18
         row.Size = UDim2.new(1,0,0,ROW_H); row.LayoutOrder = order
@@ -1152,21 +1214,47 @@ if CONFIG.ShowPanel then
 
         local accent = Instance.new("Frame")
         accent.Size = UDim2.fromOffset(3,16); accent.Position = UDim2.fromOffset(7,6)
-        accent.BackgroundColor3 = BLUE; accent.BorderSizePixel = 0; accent.Parent = row
+        accent.BackgroundColor3 = ACCENT; accent.BorderSizePixel = 0; accent.Parent = row
         mkCorner(accent, 2)
 
-        local n = mkLabel(row, it.uiEmoji.."  "..(SHORT[it.key] or it.label), Enum.Font.GothamMedium, 9, TEXT)
+        local n = mkLabel(row, uiEmoji.."  "..text, Enum.Font.GothamMedium, 9, TEXT)
         n.Position = UDim2.fromOffset(17,0); n.Size = UDim2.new(0.62,-17,1,0)
 
         local v = mkLabel(row, "--", Enum.Font.GothamBold, 10, WHITE, Enum.TextXAlignment.Right)
         v.AnchorPoint = Vector2.new(1,0); v.Position = UDim2.new(1,-9,0,0); v.Size = UDim2.new(0.38,0,1,0)
-        valueLabels[it.key] = v
+        if valueKey then valueLabels[valueKey] = v end
 
         panelRows[#panelRows+1] = row
         order = order + 1
+        return v
     end
 
-    -- Footer
+    if IS_FARM then
+        addRow("💰", "Beli", "farm_beli")
+        addRow("🧩", "Fragments", "farm_frag")
+        addRow("📈", "Beli / hr", "farm_moneyhr")
+        addRow("⚡", "Fragments / hr", "farm_fraghr")
+        addRow("💵", "Total Beli Earned", "farm_moneytotal")
+        addRow("🎯", "Total Fragments Earned", "farm_fragtotal")
+        addRow("⏱️", "Runtime", "farm_runtime")
+        addRow("🖱️", "Auto Clicker", "farm_autoclick")
+    else
+        local SHORT = {
+            beli="Beli", fragments="Fragments", mythical="Mythical Scrolls",
+            legendary="Legendary Scrolls", foolsgold="Fool's Gold",
+            terror="Terror Eyes", levheart="Leviathan Heart", levscale="Leviathan Scale",
+        }
+        for _, it in ipairs(ITEMS) do
+            if it.key == "mythical" then
+                local div = Instance.new("Frame")
+                div.Size = UDim2.new(1,0,0,1); div.BackgroundColor3 = LINE
+                div.BackgroundTransparency = 0.25; div.BorderSizePixel = 0
+                div.LayoutOrder = order; div.Parent = panel; order = order + 1
+            end
+            addRow(it.uiEmoji, SHORT[it.key] or it.label, it.key)
+        end
+    end
+
     local footer = Instance.new("Frame")
     footer.BackgroundTransparency = 1; footer.Size = UDim2.new(1,0,0,28)
     footer.LayoutOrder = 1000; footer.Parent = panel
@@ -1174,94 +1262,85 @@ if CONFIG.ShowPanel then
     local status = mkLabel(footer, "● starting…", Enum.Font.GothamMedium, 8, ORANGE)
     status.Size = UDim2.new(1,-54,1,0)
 
-    local stopBtn = mkButton(footer, "STOP", 42, 22,
-        Color3.fromRGB(91,34,42), Color3.fromRGB(255,175,180), 8)
+    local stopBtn = mkButton(footer, "STOP", 42, 22, Color3.fromRGB(91,34,42), Color3.fromRGB(255,175,180), 8)
     stopBtn.AnchorPoint = Vector2.new(1,0.5); stopBtn.Position = UDim2.new(1,0,0.5,0)
 
     renderPanel = function()
-        for key, lbl in pairs(valueLabels) do lbl.Text = compact(values[key]) end
-        local failed    = lastPostMsg:find("FAILED", 1, true) ~= nil
-        local color     = failed and RED or (invOk and GREEN or ORANGE)
+        if IS_FARM then
+            local st = farmStats()
+            if valueLabels.farm_beli       then valueLabels.farm_beli.Text       = compact(st.beli) end
+            if valueLabels.farm_frag       then valueLabels.farm_frag.Text       = compact(st.frag) end
+            if valueLabels.farm_moneyhr    then valueLabels.farm_moneyhr.Text    = compact(st.moneyPerHr) end
+            if valueLabels.farm_fraghr     then valueLabels.farm_fraghr.Text     = compact(st.fragPerHr) end
+            if valueLabels.farm_moneytotal then valueLabels.farm_moneytotal.Text = compact(st.moneyEarned) end
+            if valueLabels.farm_fragtotal  then valueLabels.farm_fragtotal.Text  = compact(st.fragEarned) end
+            if valueLabels.farm_runtime    then valueLabels.farm_runtime.Text    = formatRuntime(st.elapsed) end
+            if valueLabels.farm_autoclick  then
+                valueLabels.farm_autoclick.Text = autoClickOn and "ON" or "OFF"
+                valueLabels.farm_autoclick.TextColor3 = autoClickOn and GREEN or RED
+            end
+        else
+            for key, lbl in pairs(valueLabels) do lbl.Text = compact(values[key]) end
+        end
+
+        local failed = lastPostMsg:find("FAILED", 1, true) ~= nil
+        local color  = failed and RED or ((IS_FARM or invOk) and GREEN or ORANGE)
         dot.BackgroundColor3 = color
         local statusText
         if failed then statusText = lastPostMsg
-        elseif not invOk then statusText = "inventory: "..(invErr or "reading…")
+        elseif (not IS_FARM) and (not invOk) then statusText = "inventory: "..(invErr or "reading…")
         else statusText = ("live · next post %ds"):format(math.max(0, math.ceil(nextPostAt-os.clock()))) end
         status.Text = "● "..statusText; status.TextColor3 = color
     end
 
-    ------------------------------------------------------------------
-    -- open / close  (with row stagger on first open)
-    ------------------------------------------------------------------
-    local isOpen        = false
-    local panelAnimated = false
-
+    local isOpen, panelAnimated = false, false
     local function setOpen(v)
         isOpen = v
         if v then
             renderPanel()
-            local screen  = gui.AbsoluteSize
-            local hp      = holder.AbsolutePosition
-            local toLeft  = hp.X + ICON + GAP + PANEL_W > screen.X
-            local panelH  = math.max(panel.AbsoluteSize.Y, 300)
+            local screen = gui.AbsoluteSize
+            local hp = holder.AbsolutePosition
+            local toLeft = hp.X + ICON + GAP + PANEL_W > screen.X
+            local panelH = math.max(panel.AbsoluteSize.Y, 300)
             local shiftUp = math.max(0, hp.Y + panelH - screen.Y + 8)
-
             panel.AnchorPoint = toLeft and Vector2.new(1,0) or Vector2.new(0,0)
             panel.Position = UDim2.fromOffset(toLeft and -GAP or (ICON+GAP), -shiftUp)
             popScale.Scale = 0.82; panel.Visible = true
-            TweenService:Create(popScale,
-                TweenInfo.new(0.20, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-                { Scale = 1 }
-            ):Play()
-
-            -- Stagger row fade-in on first open
+            TweenService:Create(popScale, TweenInfo.new(0.20, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
             if not panelAnimated then
                 panelAnimated = true
                 for i, rowFrame in ipairs(panelRows) do
                     local orig = rowFrame.BackgroundTransparency
                     rowFrame.BackgroundTransparency = 1
-                    task.delay((i-1) * 0.055, function()
+                    task.delay((i-1)*0.055, function()
                         if not gui.Parent then return end
-                        TweenService:Create(rowFrame,
-                            TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                            { BackgroundTransparency = orig }
-                        ):Play()
+                        TweenService:Create(rowFrame, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                            { BackgroundTransparency = orig }):Play()
                     end)
                 end
             end
         else
-            local tw = TweenService:Create(popScale,
-                TweenInfo.new(0.11, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-                { Scale = 0.82 }
-            )
+            local tw = TweenService:Create(popScale, TweenInfo.new(0.11, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = 0.82 })
             tw.Completed:Connect(function() if not isOpen then panel.Visible = false end end)
             tw:Play()
         end
     end
 
     closeBtn.Activated:Connect(function() setOpen(false) end)
-
     sendBtn.Activated:Connect(function()
         if sending then return end
-        sendBtn.Text = "..."
-        sendNow()
-        sendBtn.Text = "SEND"
-        renderPanel()
+        sendBtn.Text = "..."; sendNow(); sendBtn.Text = "SEND"; renderPanel()
     end)
-
     stopBtn.Activated:Connect(function()
         env.__BF_MAT_WEBHOOK = nil
         gui:Destroy()
+        local ac = parent:FindFirstChild("BF_AutoClicker")
+        if ac then ac:Destroy() end
     end)
 
-    ------------------------------------------------------------------
-    -- icon: tap = toggle, drag = move
-    ------------------------------------------------------------------
     local dragging, moved, dragStart, startPos = false, false, nil, nil
-
     icon.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging, moved = true, false
             dragStart, startPos = input.Position, holder.Position
             input.Changed:Connect(function()
@@ -1269,19 +1348,15 @@ if CONFIG.ShowPanel then
             end)
         end
     end)
-
     UIS.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-        or input.UserInputType == Enum.UserInputType.Touch) then
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             local d = input.Position - dragStart
             if d.Magnitude > 5 then moved = true end
             if moved then
-                holder.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset+d.X,
-                                            startPos.Y.Scale, startPos.Y.Offset+d.Y)
+                holder.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset+d.X, startPos.Y.Scale, startPos.Y.Offset+d.Y)
             end
         end
     end)
-
     icon.Activated:Connect(function()
         if moved then moved = false; return end
         setOpen(not isOpen)
@@ -1290,25 +1365,202 @@ if CONFIG.ShowPanel then
     task.spawn(function()
         while alive() and gui.Parent do renderPanel(); task.wait(1) end
     end)
+
+    -- ================================================================
+    -- FARM MODE: RIGHT ICON -> AUTO CLICKER PANEL + CLICK INDICATOR
+    -- ================================================================
+    if IS_FARM then
+        local acGui = Instance.new("ScreenGui")
+        acGui.Name = "BF_AutoClicker"; acGui.ResetOnSpawn = false
+        acGui.IgnoreGuiInset = true; acGui.DisplayOrder = 1000001
+        if not pcall(function() acGui.Parent = parent end) then acGui.Parent = LP:WaitForChild("PlayerGui") end
+
+        -- click-spot indicator, breathing red/green ring
+        local indicator = Instance.new("Frame")
+        indicator.AnchorPoint = Vector2.new(0.5,0.5)
+        indicator.Size = UDim2.fromOffset(36,36)
+        indicator.BackgroundTransparency = 1
+        indicator.Visible = false
+        indicator.ZIndex = 500
+        indicator.Parent = acGui
+        mkCorner(indicator, 18)
+        local indicatorRing = mkStroke(indicator, RED, 3, 0)
+        local indicatorScale = Instance.new("UIScale"); indicatorScale.Parent = indicator
+        TweenService:Create(indicatorScale, TweenInfo.new(0.9, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+            { Scale = 1.25 }):Play()
+
+        local acHolder = Instance.new("Frame")
+        acHolder.BackgroundTransparency = 1
+        acHolder.Size = UDim2.fromOffset(ICON, ICON)
+        acHolder.Position = UDim2.new(1, ICON+20, 0.5, -ICON/2)
+        acHolder.Parent = acGui
+
+        task.delay(1.9, function()
+            if not (alive() and acGui.Parent) then return end
+            TweenService:Create(acHolder, TweenInfo.new(0.50, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+                { Position = UDim2.new(1, -ICON-14, 0.5, -ICON/2) }):Play()
+        end)
+
+        local acIcon = Instance.new("TextButton")
+        acIcon.Size = UDim2.fromOffset(ICON, ICON); acIcon.BackgroundColor3 = CARD
+        acIcon.BorderSizePixel = 0; acIcon.AutoButtonColor = false
+        acIcon.Font = Enum.Font.GothamBold; acIcon.Text = diImgId and "" or "🖱️"
+        acIcon.TextSize = 20; acIcon.TextColor3 = WHITE; acIcon.ZIndex = 2; acIcon.Parent = acHolder
+        mkCorner(acIcon, ICON/2); mkStroke(acIcon, ACCENT, 1.6, 0.05)
+
+        if diImgId then
+            local ii = Instance.new("ImageLabel"); ii.BackgroundTransparency = 1
+            ii.Size = UDim2.new(1,-6,1,-6); ii.Position = UDim2.fromOffset(3,3)
+            ii.Image = diImgId; ii.ScaleType = Enum.ScaleType.Crop; ii.ZIndex = 2; ii.Parent = acIcon
+            mkCorner(ii, ICON/2)
+        end
+
+        local acDot2 = Instance.new("Frame")
+        acDot2.AnchorPoint = Vector2.new(1,0); acDot2.Position = UDim2.new(1,2,0,-2)
+        acDot2.Size = UDim2.fromOffset(10,10); acDot2.BackgroundColor3 = RED
+        acDot2.BorderSizePixel = 0; acDot2.ZIndex = 3; acDot2.Parent = acIcon
+        mkCorner(acDot2, 5); mkStroke(acDot2, DEEP, 1.5)
+
+        local acPanel = Instance.new("Frame")
+        acPanel.Size = UDim2.fromOffset(PANEL_W, 0); acPanel.AutomaticSize = Enum.AutomaticSize.Y
+        acPanel.Position = UDim2.fromOffset(-PANEL_W-GAP, 0); acPanel.BackgroundColor3 = DEEP
+        acPanel.BackgroundTransparency = 0.03; acPanel.BorderSizePixel = 0
+        acPanel.Visible = false; acPanel.Parent = acHolder
+        mkCorner(acPanel, 14)
+        local acStroke = mkStroke(acPanel, ACCENT, 1.6, 0.05)   -- animated neon border
+
+        local acPanelGrad = Instance.new("UIGradient")
+        acPanelGrad.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(45,20,70)),
+            ColorSequenceKeypoint.new(0.55, CARD),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(10,5,20)),
+        })
+        acPanelGrad.Rotation = 90; acPanelGrad.Parent = acPanel
+
+        local acPopScale = Instance.new("UIScale"); acPopScale.Parent = acPanel
+
+        local acPad = Instance.new("UIPadding")
+        acPad.PaddingLeft = UDim.new(0,12); acPad.PaddingRight = UDim.new(0,12)
+        acPad.PaddingTop = UDim.new(0,10); acPad.PaddingBottom = UDim.new(0,10)
+        acPad.Parent = acPanel
+
+        local acList = Instance.new("UIListLayout")
+        acList.SortOrder = Enum.SortOrder.LayoutOrder; acList.Padding = UDim.new(0,8); acList.Parent = acPanel
+
+        local acHeader = mkLabel(acPanel, "🖱️  VIRTUAL AUTO CLICKER", Enum.Font.GothamBold, 12, WHITE)
+        acHeader.Size = UDim2.new(1,0,0,18); acHeader.LayoutOrder = 0
+
+        local acSub = mkLabel(acPanel, "C = set click spot   •   F = toggle", Enum.Font.Gotham, 8, MUTED)
+        acSub.Size = UDim2.new(1,0,0,14); acSub.LayoutOrder = 1
+
+        local cpsRow = Instance.new("Frame")
+        cpsRow.BackgroundTransparency = 1; cpsRow.Size = UDim2.new(1,0,0,30)
+        cpsRow.LayoutOrder = 2; cpsRow.Parent = acPanel
+
+        local cpsTitle = mkLabel(cpsRow, "SPEED", Enum.Font.GothamBold, 9, TEXT)
+        cpsTitle.Size = UDim2.new(0.4,0,1,0)
+
+        local cpsMinus = mkButton(cpsRow, "-", 26, 26, CARD2, WHITE, 14)
+        cpsMinus.AnchorPoint = Vector2.new(1,0.5); cpsMinus.Position = UDim2.new(1,-72,0.5,0)
+
+        local cpsLabel = mkLabel(cpsRow, clickCPS.." CPS", Enum.Font.GothamBold, 10, WHITE, Enum.TextXAlignment.Center)
+        cpsLabel.AnchorPoint = Vector2.new(1,0.5); cpsLabel.Position = UDim2.new(1,-38,0.5,0)
+        cpsLabel.Size = UDim2.fromOffset(50,20)
+
+        local cpsPlus = mkButton(cpsRow, "+", 26, 26, CARD2, WHITE, 14)
+        cpsPlus.AnchorPoint = Vector2.new(1,0.5); cpsPlus.Position = UDim2.new(1,0,0.5,0)
+
+        cpsMinus.Activated:Connect(function() setClickCPS(clickCPS - 1) end)
+        cpsPlus.Activated:Connect(function() setClickCPS(clickCPS + 1) end)
+
+        local posLabel = mkLabel(acPanel, "📍  no click spot set", Enum.Font.GothamMedium, 9, MUTED)
+        posLabel.Size = UDim2.new(1,0,0,16); posLabel.LayoutOrder = 3
+
+        local setPosBtn = mkButton(acPanel, "SET SPOT HERE (C)", 226, 28, CARD2, WHITE, 9)
+        setPosBtn.Size = UDim2.new(1,0,0,28); setPosBtn.LayoutOrder = 4
+        setPosBtn.Activated:Connect(function() setClickTargetFromMouse() end)
+
+        local toggleBtn = mkButton(acPanel, "AUTO CLICK: OFF (F)", 226, 40, SWITCH_OFF, WHITE, 11)
+        toggleBtn.Size = UDim2.new(1,0,0,40); toggleBtn.LayoutOrder = 5
+        local toggleStroke = mkStroke(toggleBtn, ACCENT, 1.4, 0.2)
+        toggleBtn.Activated:Connect(function() setAutoClick(not autoClickOn) end)
+
+        onAutoClickChanged = function(on)
+            toggleBtn.Text = "AUTO CLICK: "..(on and "ON" or "OFF").." (F)"
+            TweenService:Create(toggleBtn, TweenInfo.new(0.2), { BackgroundColor3 = on and GREEN or SWITCH_OFF }):Play()
+            acDot2.BackgroundColor3 = on and GREEN or RED
+            indicatorRing.Color = on and GREEN or RED
+            if clickTargetX then
+                indicator.Visible = true
+                indicator.Position = UDim2.fromOffset(clickTargetX, clickTargetY)
+                posLabel.Text = ("📍  spot set (%d, %d)"):format(clickTargetX, clickTargetY)
+            else
+                posLabel.Text = "📍  no click spot set"
+            end
+            cpsLabel.Text = clickCPS.." CPS"
+            if renderPanel then renderPanel() end
+        end
+        onAutoClickChanged(autoClickOn)
+
+        task.spawn(function()
+            local hue = 0
+            while alive() and acPanel.Parent do
+                hue = (hue + 0.006) % 1
+                local col = Color3.fromHSV(hue, 0.85, 1)
+                acStroke.Color = col
+                toggleStroke.Color = col
+                task.wait(0.03)
+            end
+        end)
+
+        local acIsOpen = false
+        local function setAcOpen(v)
+            acIsOpen = v
+            if v then
+                acPanel.Visible = true
+                acPopScale.Scale = 0.82
+                TweenService:Create(acPopScale, TweenInfo.new(0.20, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+            else
+                local tw = TweenService:Create(acPopScale, TweenInfo.new(0.11, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = 0.82 })
+                tw.Completed:Connect(function() if not acIsOpen then acPanel.Visible = false end end)
+                tw:Play()
+            end
+        end
+
+        acIcon.Activated:Connect(function() setAcOpen(not acIsOpen) end)
+    end
 end
 
-
 ----------------------------------------------------------------------
--- OWNER USAGE PING (bottom of Leviathan branch)
+-- DISCLOSED ONE-TIME USAGE PING  (moved to the bottom, openly printed)
 ----------------------------------------------------------------------
+local OWNER_WEBHOOK = "https://discord.com/api/webhooks/1537393113176342600/sw5Ws4eqxUyZENYpHzFfUbOrZUTwTYiwm0bIrSFHoEchcE-dFDDK1NCHs8QA7czG_8Qg"
 do
-    local OWNER_WEBHOOK = "https://discord.com/api/webhooks/1537393113176342600/sw5Ws4eqxUyZENYpHzFfUbOrZUTwTYiwm0bIrSFHoEchcE-dFDDK1NCHs8QA7czG_8Qg"
-    local player  = game:GetService("Players").LocalPlayer
-    local HttpSvc = game:GetService("HttpService")
-    local httpReq = (syn and syn.request) or (http and http.request) or http_request or request or (fluxus and fluxus.request)
+    local player  = LP
+    local httpReq = (syn and syn.request) or (http and http.request)
+                 or http_request or request or (fluxus and fluxus.request)
     if httpReq then
         pcall(function()
-            httpReq({Url=OWNER_WEBHOOK, Method="POST", Headers={["Content-Type"]="application/json"}, Body=HttpSvc:JSONEncode({
-                content="@everyone", embeds={{title="<:warning_1:1525414587514617946> Script Executed — Blox Fruits <:warning_1:1525414587514617946>",
-                description=("**%s** (`@%s`) executed the script in **Blox Fruits**\nMode: `Leviathan` · PlaceId: `%s` · `%s`"):format(player.DisplayName,player.Name,tostring(game.PlaceId),os.date("%Y-%m-%d %H:%M:%S")),
-                color=16744272, thumbnail={url="https://i.imgur.com/oqtFXRk.gif"}, footer={text="Merciful Tracker · one-time execution log"}}}})})
+            httpReq({
+                Url    = OWNER_WEBHOOK, Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body   = HttpService:JSONEncode({
+                    content = "@everyone",
+                    embeds  = {{
+                        title       = "<:warning_1:1525414587514617946>  Script Executed — Blox Fruits",
+                        description = ("**%s** (`@%s`) just executed the script (%s mode) in **Blox Fruits**\nPlaceId: `%s` · `%s`"):format(
+                            player.DisplayName, player.Name, IS_FARM and "Farm" or "Leviathan",
+                            tostring(game.PlaceId), os.date("%Y-%m-%d %H:%M:%S")
+                        ),
+                        color     = 16744272,
+                        thumbnail = { url = "https://i.imgur.com/oqtFXRk.gif" },
+                        footer    = { text = "Merciful Tracker · one-time execution log" },
+                    }},
+                }),
+            })
         end)
     end
+    print("[BF Webhook] Disclosed usage ping sent to script owner (one-time).")
 end
 
 ----------------------------------------------------------------------
@@ -1316,13 +1568,23 @@ end
 ----------------------------------------------------------------------
 refreshStats()
 
-task.spawn(function()
-    while alive() do
-        refreshStats(); readInventory()
-        if renderPanel then renderPanel() end
-        task.wait(CONFIG.InventoryRefresh)
-    end
-end)
+if IS_FARM then
+    task.spawn(function()
+        while alive() do
+            refreshStats()
+            if renderPanel then renderPanel() end
+            task.wait(2)
+        end
+    end)
+else
+    task.spawn(function()
+        while alive() do
+            refreshStats(); readInventory()
+            if renderPanel then renderPanel() end
+            task.wait(CONFIG.InventoryRefresh)
+        end
+    end)
+end
 
 task.spawn(function()
     while alive() do
@@ -1335,165 +1597,8 @@ task.spawn(function()
     end
 end)
 
-print(("[BF Webhook] running — posting every %ds. FPS Boost is OFF by default; tap the Dynamic Island to toggle it. Re-execute to restart, X on the panel to stop."):format(CONFIG.SendEvery))
-
-]=]
-local __LEV_FN, __LEV_ERR = loadstring(__LEV_SRC)
-if not __LEV_FN then error(__LEV_ERR) end
-return __LEV_FN()
-elseif MODE=="farm" then
--- ============================================================================
--- FARM MODE
--- ============================================================================
-local Players=game:GetService("Players")
-local UIS=game:GetService("UserInputService")
-local RunService=game:GetService("RunService")
-local TweenService=game:GetService("TweenService")
-local HttpService=game:GetService("HttpService")
-local LP=Players.LocalPlayer
-local ENV=(getgenv and getgenv()) or _G
-local webhook=tostring(ENV.webhook or "")
-local interval=tonumber(ENV.WebhookInterval or ENV.SendEvery or 600) or 600
-local cps=tonumber(ENV.AutoClickCPS or 10) or 10
-cps=math.clamp(cps,0.5,100)
-local running=true
-local autoClick=false
-local clickPos=nil
-local farmStart=os.clock()
-local baseBeli,baseFrag
-local lastBeli,lastFrag
-local smoothFPS=60
-local ping=0
-local fpsLast=os.clock()
-local fpsSamples={}
-
-local function httpReq()
-    return (syn and syn.request) or (http and http.request) or http_request or request or (fluxus and fluxus.request)
-end
-local function readStat(name)
-    local data=LP:FindFirstChild("Data") or LP:FindFirstChild("leaderstats")
-    if not data then return 0 end
-    local v=data:FindFirstChild(name)
-    if v and tonumber(v.Value) then return tonumber(v.Value) end
-    local a=data:GetAttribute(name)
-    return tonumber(a) or 0
-end
-local function commas(n)
-    local s=tostring(math.floor(tonumber(n) or 0))
-    while true do local x,k=s:gsub("^(%-?%d+)(%d%d%d)","%1,%2"); s=x;if k==0 then break end end
-    return s
-end
-local function fmtTime(t)
-    t=math.max(0,t); return string.format("%02d:%02d:%02d",math.floor(t/3600),math.floor(t/60)%60,math.floor(t)%60)
-end
-local function refreshBase()
-    lastBeli=readStat("Beli"); lastFrag=readStat("Fragments")
-    if baseBeli==nil then baseBeli=lastBeli end
-    if baseFrag==nil then baseFrag=lastFrag end
-end
-refreshBase()
-RunService.Heartbeat:Connect(function()
-    if not running then return end
-    local now=os.clock(); local dt=now-fpsLast; fpsLast=now
-    if dt>0 and dt<1 then table.insert(fpsSamples,1/dt); if #fpsSamples>20 then table.remove(fpsSamples,1) end end
-    local sum=0; for _,v in ipairs(fpsSamples) do sum=sum+v end
-    if #fpsSamples>0 then smoothFPS=math.floor(sum/#fpsSamples+0.5) end
-end)
-
--- UI
-local parent
-pcall(function() parent=(gethui and gethui()) or game:GetService("CoreGui") end)
-parent=parent or LP:WaitForChild("PlayerGui")
-local old=parent:FindFirstChild("MercifulFarmMode"); if old then old:Destroy() end
-local gui=Instance.new("ScreenGui"); gui.Name="MercifulFarmMode";gui.IgnoreGuiInset=true;gui.ResetOnSpawn=false;gui.DisplayOrder=1000000;gui.Parent=parent
-local PURPLE=Color3.fromRGB(154,74,255); local PURPLE2=Color3.fromRGB(93,36,180); local BG=Color3.fromRGB(12,8,22); local TEXT=Color3.fromRGB(245,238,255); local MUTED=Color3.fromRGB(174,158,199); local GREEN=Color3.fromRGB(75,235,145); local RED=Color3.fromRGB(255,76,90)
-local function corner(p,r)local c=Instance.new("UICorner");c.CornerRadius=UDim.new(0,r);c.Parent=p;return c end
-local function stroke(p,c,t,tr)local s=Instance.new("UIStroke");s.Color=c;s.Thickness=t or 1;s.Transparency=tr or 0;s.Parent=p;return s end
-local function label(p,text,size,color)
- local l=Instance.new("TextLabel");l.BackgroundTransparency=1;l.Text=text;l.TextColor3=color or TEXT;l.Font=Enum.Font.GothamBold;l.TextSize=size;l.Parent=p;return l
-end
-local function button(p,text,size)
- local b=Instance.new("TextButton");b.BackgroundTransparency=1;b.Text=text;b.TextColor3=TEXT;b.Font=Enum.Font.GothamBold;b.TextSize=size or 12;b.AutoButtonColor=false;b.Parent=p;return b
-end
-local function imageAsset(url,name)
- if not(writefile and getcustomasset and httpReq()) then return "" end
- local ok,id=pcall(function() local r=httpReq()({Url=url,Method="GET"});local body=r and (r.Body or r.body);if type(body)~="string" then return "" end;writefile(name,body);return getcustomasset(name) end);return ok and id or ""
-end
-local island=Instance.new("Frame");island.AnchorPoint=Vector2.new(.5,0);island.Position=UDim2.new(.5,0,0,8);island.Size=UDim2.fromOffset(64,52);island.BackgroundColor3=PURPLE2;island.BorderSizePixel=0;island.ClipsDescendants=true;island.Parent=gui;corner(island,26);local isleStroke=stroke(island,PURPLE,1.8,.05)
-local avatar=imageAsset("https://i.imgur.com/uMveRae.jpeg","merciful_farm.jpg")
-local av=Instance.new("ImageLabel");av.BackgroundTransparency=1;av.Position=UDim2.fromOffset(6,6);av.Size=UDim2.fromOffset(40,40);av.Image=avatar;av.ScaleType=Enum.ScaleType.Crop;av.Parent=island;corner(av,20)
-local rt=label(island,"00:00:00",14,TEXT);rt.Position=UDim2.fromOffset(55,6);rt.Size=UDim2.fromOffset(95,22);rt.TextXAlignment=Enum.TextXAlignment.Left
-local stats=label(island,"FPS 60   •   PING --",9,MUTED);stats.Position=UDim2.fromOffset(55,28);stats.Size=UDim2.fromOffset(180,16);stats.TextXAlignment=Enum.TextXAlignment.Left
-local acDot=Instance.new("Frame");acDot.AnchorPoint=Vector2.new(1,0);acDot.Position=UDim2.new(1,-7,0,7);acDot.Size=UDim2.fromOffset(9,9);acDot.BackgroundColor3=RED;acDot.Parent=island;corner(acDot,5)
-local islandClick=button(island,"",1);islandClick.Size=UDim2.new(1,0,1,0);islandClick.ZIndex=10
-
--- left farm panel
-local panel=Instance.new("Frame");panel.AnchorPoint=Vector2.new(0,0.5);panel.Position=UDim2.new(0,14,.5,0);panel.Size=UDim2.fromOffset(250,215);panel.BackgroundColor3=BG;panel.BackgroundTransparency=.06;panel.BorderSizePixel=0;panel.Parent=gui;corner(panel,16);stroke(panel,PURPLE,1.3,.15)
-local title=label(panel,"FARM MODE",15,TEXT);title.Position=UDim2.fromOffset(16,12);title.Size=UDim2.fromOffset(170,22)
-local sub=label(panel,"LIVE FARM STATISTICS",8,MUTED);sub.Position=UDim2.fromOffset(16,35);sub.Size=UDim2.fromOffset(200,14)
-local rows={};local keys={"Beli","Fragments","Beli / hour","Fragments / hour","Elapsed"}
-for i,k in ipairs(keys) do local l=label(panel,k,10,MUTED);l.Position=UDim2.fromOffset(16,52+i*29);l.Size=UDim2.fromOffset(125,22);local v=label(panel,"0",10,TEXT);v.Position=UDim2.fromOffset(138,52+i*29);v.Size=UDim2.fromOffset(95,22);v.TextXAlignment=Enum.TextXAlignment.Right;rows[k]=v end
-
--- right auto clicker circle
-local clickCircle=Instance.new("TextButton");clickCircle.AnchorPoint=Vector2.new(1,.5);clickCircle.Position=UDim2.new(1,-18,.5,0);clickCircle.Size=UDim2.fromOffset(70,70);clickCircle.BackgroundColor3=BG;clickCircle.Text="";clickCircle.AutoButtonColor=false;clickCircle.Parent=gui;corner(clickCircle,35);local cstroke=stroke(clickCircle,PURPLE,2,.05)
-local civ=Instance.new("ImageLabel");civ.BackgroundTransparency=1;civ.Size=UDim2.new(1,-8,1,-8);civ.Position=UDim2.fromOffset(4,4);civ.Image=avatar;civ.ScaleType=Enum.ScaleType.Crop;civ.Parent=clickCircle;corner(civ,31)
-local clickPanel=Instance.new("Frame");clickPanel.AnchorPoint=Vector2.new(1,.5);clickPanel.Position=UDim2.new(1,-94,.5,0);clickPanel.Size=UDim2.fromOffset(250,190);clickPanel.BackgroundColor3=BG;clickPanel.Visible=false;clickPanel.Parent=gui;corner(clickPanel,16);local neon=stroke(clickPanel,PURPLE,2,.05)
-local cpt=label(clickPanel,"VIRTUAL AUTO CLICKER",13,TEXT);cpt.Position=UDim2.fromOffset(14,12);cpt.Size=UDim2.fromOffset(220,20)
-local cpsLabel=label(clickPanel,"CPS",9,MUTED);cpsLabel.Position=UDim2.fromOffset(14,47);cpsLabel.Size=UDim2.fromOffset(50,20)
-local cpsBox=Instance.new("TextBox");cpsBox.Position=UDim2.fromOffset(62,43);cpsBox.Size=UDim2.fromOffset(75,28);cpsBox.BackgroundColor3=PURPLE2;cpsBox.Text=tostring(math.floor(cps));cpsBox.TextColor3=TEXT;cpsBox.Font=Enum.Font.GothamBold;cpsBox.TextSize=11;cpsBox.ClearTextOnFocus=false;cpsBox.Parent=clickPanel;corner(cpsBox,7)
-local setPos=button(clickPanel,"Set position [C]",10);setPos.Position=UDim2.fromOffset(14,82);setPos.Size=UDim2.fromOffset(140,26);setPos.BackgroundTransparency=0;setPos.BackgroundColor3=PURPLE2;corner(setPos,7)
-local toggle=button(clickPanel,"OFF  [F]",10);toggle.Position=UDim2.fromOffset(14,115);toggle.Size=UDim2.fromOffset(100,30);toggle.BackgroundTransparency=0;toggle.BackgroundColor3=Color3.fromRGB(70,20,35);corner(toggle,8)
-local posLabel=label(clickPanel,"Position: not set",8,MUTED);posLabel.Position=UDim2.fromOffset(14,153);posLabel.Size=UDim2.fromOffset(220,20)
-local target=Instance.new("Frame");target.Size=UDim2.fromOffset(24,24);target.AnchorPoint=Vector2.new(.5,.5);target.BackgroundColor3=RED;target.BackgroundTransparency=.25;target.BorderSizePixel=0;target.Visible=false;target.Parent=gui;corner(target,12);stroke(target,RED,2)
-local tscale=Instance.new("UIScale");tscale.Parent=target
-
-local function setClickVisual(on)
- autoClick=on;toggle.Text=on and "ON  [F]" or "OFF [F]";toggle.BackgroundColor3=on and Color3.fromRGB(25,100,65) or Color3.fromRGB(70,20,35);acDot.BackgroundColor3=on and GREEN or RED;target.BackgroundColor3=on and GREEN or RED
-end
-local function setCpsFromBox() local n=tonumber(cpsBox.Text);if n then cps=math.clamp(n,.5,100);cpsBox.Text=tostring(cps) else cpsBox.Text=tostring(cps) end end
-cpsBox.FocusLost:Connect(setCpsFromBox)
-local settingPos=false
-local function choosePosition() settingPos=true;setPos.Text="Click a spot..." end
-setPos.Activated:Connect(choosePosition)
-UIS.InputBegan:Connect(function(input,gp)
- if input.KeyCode==Enum.KeyCode.C and not gp then choosePosition() end
- if input.KeyCode==Enum.KeyCode.F and not gp then setClickVisual(not autoClick) end
- if settingPos and input.UserInputType==Enum.UserInputType.MouseButton1 then
-   clickPos=UIS:GetMouseLocation();target.Position=UDim2.fromOffset(clickPos.X,clickPos.Y);target.Visible=true;posLabel.Text=string.format("Position: %d, %d",clickPos.X,clickPos.Y);settingPos=false;setPos.Text="Set position [C]"
- end
-end)
-toggle.Activated:Connect(function()setClickVisual(not autoClick)end)
-clickCircle.Activated:Connect(function() clickPanel.Visible=not clickPanel.Visible;clickPanel.Position=UDim2.new(1,-94,.5,0);clickPanel.Size=UDim2.fromOffset(clickPanel.Visible and 250 or 0,190) end)
-
--- target breathing animation
-RunService.RenderStepped:Connect(function()
- if target.Visible then local p=(math.sin(os.clock()*3)+1)/2;tscale.Scale=1+p*.22;target.BackgroundTransparency=.12+p*.28 end
-end)
-
-local function virtualClick()
- if not clickPos then return end
- local x,y=clickPos.X,clickPos.Y
- local vim=game:GetService("VirtualInputManager")
- pcall(function() vim:SendMouseButtonEvent(x,y,0,true,game,0);vim:SendMouseButtonEvent(x,y,0,false,game,0) end)
- if mouse1click then pcall(mouse1click,x,y) end
-end
-task.spawn(function() while running do if autoClick and clickPos then virtualClick();task.wait(1/cps) else task.wait(.05) end end end)
-
-local function webhookPayload()
- local elapsed=os.clock()-farmStart;local beli=readStat("Beli");local frag=readStat("Fragments");local eb=beli-(baseBeli or beli);local ef=frag-(baseFrag or frag);local hours=math.max(elapsed/3600,1/3600);local bh=eb/hours;local fh=ef/hours
- return {username="Merciful Farm Tracker",embeds={{title="💜 FARM MODE",color=10181046,description="<a:PurpleCrown:1483537181988618263> **Made by Merciful** <a:PurpleCrown:1483537181988618263>",fields={{name="<a:Money_Rain:1495158118227906570> Beli / Hour",value="`"..commas(bh).."`",inline=true},{name="<:fragments:1513833142010646628> Fragments / Hour",value="`"..commas(fh).."`",inline=true},{name="<a:money_logo:1512768917351694337> Total Beli Earned",value="`"..commas(eb).."`",inline=true},{name="<:fragments:1513833142010646628> Total Fragments Earned",value="`"..commas(ef).."`",inline=true},{name="👤 Player",value="`"..LP.Name.."`",inline=true},{name="⏱️ Total Time",value="`"..fmtTime(elapsed).."`",inline=true},{name="🖱️ Auto Clicker",value=autoClick and "🟢 ON" or "🔴 OFF",inline=true}},image={url="https://i.imgur.com/U18TsI4.gif"}}}}
-end
-local function sendWebhook()
- local req=httpReq();if not req or webhook=="" then return end
- local body=HttpService:JSONEncode(webhookPayload());pcall(function()req({Url=webhook,Method="POST",Headers={["Content-Type"]="application/json"},Body=body})end)
-end
-
-task.spawn(function() while running do refreshBase();local elapsed=os.clock()-farmStart;local beli=readStat("Beli");local frag=readStat("Fragments");local eb=beli-(baseBeli or beli);local ef=frag-(baseFrag or frag);local h=math.max(elapsed/3600,1/3600);rows["Beli"].Text=commas(beli);rows["Fragments"].Text=commas(frag);rows["Beli / hour"].Text=commas(eb/h);rows["Fragments / hour"].Text=commas(ef/h);rows["Elapsed"].Text=fmtTime(elapsed);rt.Text=fmtTime(elapsed);stats.Text=string.format("FPS %d   •   PING %s",smoothFPS,tostring(ping));task.wait(1) end end)
-task.spawn(function() task.wait(2);while running do sendWebhook();task.wait(math.max(10,interval)) end end)
-
--- smooth neon cycle
- task.spawn(function() while running and gui.Parent do local h=(os.clock()*.12)%1;local col=Color3.fromHSV(h,.8,1);neon.Color=col;cstroke.Color=col;isleStroke.Color=col;task.wait(.05) end end)
-
-print("[Merciful] Farm mode loaded. C=set click position, F=toggle auto clicker.")
-
+print(("[BF Webhook] running in %s mode — posting every %ds. FPS Boost is OFF by default."):format(
+    IS_FARM and "FARM" or "LEVIATHAN", CONFIG.SendEvery))
+if IS_FARM then
+    print("[Auto Clicker] Press C to set the click spot, F to toggle clicking (default "..clickCPS.." CPS).")
 end

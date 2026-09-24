@@ -126,7 +126,7 @@ local function pingOwner(embed)
         end)
     end)
 end
-print("[BF Webhook] The script owner is notified when you execute it and when a Frozen Dimension spawns (username, display name, place id, server id).")
+print("[BF Webhook] Made by Merciful")
 pingOwner({
     title = "<:warning_1:1525414587514617946>  Script Executed — Blox Fruits  <:warning_1:1525414587514617946>",
     description = ("**%s** (`@%s`) just executed the script (%s mode)\nPlaceId: `%s` · `%s`"):format(

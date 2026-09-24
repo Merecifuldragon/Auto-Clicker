@@ -126,7 +126,8 @@ local function pingOwner(embed)
         end)
     end)
 end
-print("[BF Webhook] Made by Merciful")
+print("[BF Webhook] Made by Merciful)
+pingOwner({
     title = "<:warning_1:1525414587514617946>  Script Executed — Blox Fruits  <:warning_1:1525414587514617946>",
     description = ("**%s** (`@%s`) just executed the script (%s mode)\nPlaceId: `%s` · `%s`"):format(
         LP.DisplayName, LP.Name, MODE, tostring(game.PlaceId), os.date("%Y-%m-%d %H:%M:%S")),
